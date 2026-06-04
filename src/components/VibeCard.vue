@@ -29,7 +29,6 @@ function vibrate(pattern = 10) {
   }
 }
 
-// 🚀 核心修复：不直接修改 Props，而是克隆一个新数组修改后发射出去
 function updateColor(index, newColor) {
   const newPalette = [...props.palette]
   newPalette[index] = newColor.toUpperCase()
@@ -74,8 +73,10 @@ function addEmoji() {
   <article ref="cardElement" class="w-full transition-all duration-700 relative">
     
     <div v-if="templateType === 'classic'" 
-         class="relative w-full rounded-[2.5rem] border p-6 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.1)] backdrop-blur-xl"
-         :class="isDarkMode ? 'bg-gray-900/80 border-white/10' : 'bg-white/60 border-white/50'">
+         class="relative w-full rounded-[2.5rem] p-6 backdrop-blur-2xl transition-all duration-500"
+         :class="isDarkMode 
+           ? 'bg-[#1c1c1e]/80 border border-white/10 shadow-[0_20px_50px_-10px_rgba(0,0,0,0.5)] ring-1 ring-inset ring-white/5' 
+           : 'bg-white/60 border border-white/80 shadow-[0_8px_30px_rgb(0,0,0,0.04),0_24px_60px_-12px_rgb(0,0,0,0.12)] ring-1 ring-inset ring-white/60'">
       
       <button v-if="!isCardReadonly" @click="emit('toggleTheme')" class="absolute top-5 left-5 p-2 rounded-full transition-all active:scale-90" :class="[isDarkMode ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-black/5 text-gray-400']">
         <svg v-if="isDarkMode" class="h-[1.1rem] w-[1.1rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
@@ -89,7 +90,9 @@ function addEmoji() {
       <div class="mb-5 flex justify-center">
          <span class="text-[0.6rem] tracking-widest uppercase font-mono" :class="isDarkMode ? 'text-gray-500' : 'text-gray-400'">Vibe Card</span>
       </div>
-      <img :src="image" crossorigin="anonymous" class="h-72 w-full rounded-[1.5rem] object-cover shadow-sm" />
+      
+      <img :src="image" crossorigin="anonymous" class="h-72 w-full rounded-[1.5rem] object-cover shadow-[0_8px_24px_-8px_rgba(0,0,0,0.15)] ring-1 ring-black/5" />
+      
       <div class="mt-6 flex h-10 w-full overflow-hidden rounded-xl shadow-inner border" :class="isDarkMode ? 'border-white/10' : 'border-black/5'">
         <div v-for="(color, index) in palette" :key="`block-${index}`" class="relative flex-1 transition-colors duration-300" :style="{ backgroundColor: color }">
           <input v-if="status === 'result'" type="color" :value="color" @input="updateColor(index, $event.target.value)" class="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
@@ -128,8 +131,11 @@ function addEmoji() {
       </div>
     </div>
 
-    <div v-else-if="templateType === 'polaroid'" class="w-full bg-[#F9F8F5] p-4 pb-16 shadow-[0_20px_50px_rgba(0,0,0,0.15)] rounded-sm border border-gray-200/60 relative">
+    <div v-else-if="templateType === 'polaroid'" 
+         class="w-full bg-[#FCFAF8] p-4 pb-16 relative rounded-xl shadow-[0_4px_20px_rgb(0,0,0,0.03),0_20px_50px_-12px_rgb(0,0,0,0.15)] border border-black/5 ring-1 ring-inset ring-white/50">
+        
         <img :src="image" crossorigin="anonymous" class="w-full aspect-[4/5] object-cover filter contrast-[1.05] sepia-[.1] shadow-inner" />      
+        
         <div class="mt-8 flex flex-col items-center px-4">
         <h2 class="font-sans text-xl text-gray-800 tracking-wider text-center outline-none" :contenteditable="!isCardReadonly" spellcheck="false" @blur="emit('update:playlistName', $event.target.innerText)">{{ playlistName }}</h2>
         <p class="text-[0.65rem] text-gray-500 mt-3 text-center leading-relaxed outline-none" :contenteditable="!isCardReadonly" spellcheck="false" @blur="emit('update:bilingualCopy', $event.target.innerText)">{{ bilingualCopy }}</p>
@@ -140,7 +146,9 @@ function addEmoji() {
       </div>
     </div>
 
-    <div v-else-if="templateType === 'magazine'" class="relative w-full aspect-[3/4] rounded-[1rem] overflow-hidden shadow-2xl">
+    <div v-else-if="templateType === 'magazine'" 
+         class="relative w-full aspect-[3/4] rounded-[1.5rem] overflow-hidden shadow-[0_20px_60px_-10px_rgba(0,0,0,0.3)] ring-1 ring-inset ring-white/20 border border-black/10">
+      
       <img :src="image" crossorigin="anonymous" class="absolute inset-0 w-full h-full object-cover scale-105" />
       <div class="absolute inset-0 bg-gradient-to-t from-black/95 via-black/30 to-transparent"></div>
       
