@@ -86,7 +86,6 @@ function compressImage(file, maxWidth = 1500) {
   })
 }
 
-// 重新编写的 fetchVibeFromAI，现在它只向我们自己的后端发请求
 async function fetchVibeFromAI(base64Image, hexColors) {
   const prompt = `你是一个拥有极高审美的情绪感知专家。请分析这张图片，并结合我刚刚提取出的图片主色调（${hexColors.join(', ')}），为其生成具有杂志感和氛围感的文案。请严格按照以下 JSON 格式返回，不要输出 markdown 标记：
 {
@@ -104,7 +103,7 @@ async function fetchVibeFromAI(base64Image, hexColors) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: "qwen-vl-max",
+        model: "qwen-vl-plus",
         response_format: { type: "json_object" }, 
         messages: [{
           role: "user",
