@@ -136,7 +136,7 @@ async function fetchVibeFromAI(base64Image, hexColors) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: "qwen-vl-max",
+        model: "qwen-vl-plus",
         response_format: { type: "json_object" }, 
         messages: [{
           role: "user",
@@ -189,7 +189,8 @@ async function handleUpload(event) {
   const dataPipeline = (async () => {
     let extractedHex = []
     try {
-      const colors = await extractColors(displayImageUrl.value)
+      //压缩后的图
+      const colors = await extractColors(aiPayloadImage.value)
       extractedHex = colors.slice(0, 5).map(c => c.hex.toUpperCase())
       while (extractedHex.length < 5 && extractedHex.length > 0) {
         extractedHex.push(extractedHex[extractedHex.length - 1])
