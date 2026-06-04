@@ -3,17 +3,22 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { toBlob } from 'html-to-image'
 import { extractColors } from 'extract-colors'
 import { getChineseColorName } from './utils/color'
-// 📸 1. 拆分上传 Ref，支持直接唤起相机
+
+// 💡 1. 核心变化：在这里引入你刚刚写的外部组件！
+import VibeCard from './components/VibeCard.vue'
+
 const cameraInput = ref(null)
 const galleryInput = ref(null)
-const cardRef = ref(null)
+
+// 💡 2. 核心变化：将以前的 cardRef 改为 vibeCardRef，并新增模板状态
+const vibeCardRef = ref(null) 
+const currentTemplate = ref('classic') 
 
 const status = ref('idle')
 
 // 📖 6. 情绪手账 (Vibe Diary) 状态与逻辑
 const diaryList = ref([])
 
-// 打开日记本并读取本地缓存
 function openDiary() {
   vibrate(10)
   const stored = localStorage.getItem('vibe_diary')
@@ -23,9 +28,7 @@ function openDiary() {
   status.value = 'diary'
 }
 
-// 保存卡片时，自动记录到日记本
 function addToDiary() {
-  // 防抖：防止同一张卡片重复保存
   if (diaryList.value.length > 0 && diaryList.value[0].image === aiPayloadImage.value) return
 
   const stored = localStorage.getItem('vibe_diary')
@@ -37,29 +40,24 @@ function addToDiary() {
   const newItem = {
     id: Date.now(),
     date: new Date().toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
-    image: aiPayloadImage.value, // 核心技巧：只存极度压缩的 WebP 缩略图，省空间
+    image: aiPayloadImage.value,
     palette: [...palette.value],
     playlistName: playlistName.value,
     bilingualCopy: bilingualCopy.value,
-    isDark: isDarkMode.value // 记录当时的主题，让日记列表更好看
+    isDark: isDarkMode.value 
   }
   
-  currentList.unshift(newItem) // 最新记录插在最前面
-  
-  // 核心保护：最多只保留最近的 50 条记录，防止塞爆 localStorage
+  currentList.unshift(newItem) 
   if (currentList.length > 50) currentList.pop()
   
   localStorage.setItem('vibe_diary', JSON.stringify(currentList))
   diaryList.value = currentList
 }
 
-
-// 🖼️ 1. 用于界面高清展示和最终保存的本地原图指针
 const displayImageUrl = ref('') 
-// 🤖 2. 用于发给 AI 解析的极度压缩（马赛克）图片 Base64
 const aiPayloadImage = ref('')
 const isSaving = ref(false)
-const isRegenerating = ref(false) // 🔄 灵感刷新状态
+const isRegenerating = ref(false) 
 
 const palette = ref(['#E5E7EB', '#D1D5DB', '#9CA3AF', '#6B7280', '#4B5563'])
 const playlistName = ref('正在感知氛围...')
@@ -70,70 +68,54 @@ const scanTexts = ['正在提取光影...', '感受色彩温度...', '生成情�
 const currentScanTextIndex = ref(0)
 let scanInterval = null
 
-// 📳 2. 物理级触觉引擎 (Haptic Feedback)
 function vibrate(pattern = 15) {
-  // 检查浏览器是否支持震动 API（Android 完美支持，iOS 仅部分 PWA 支持）
   if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
     try { navigator.vibrate(pattern) } catch(e) {}
   }
 }
 
-// 🌓 3. 核心算法：计算色彩亮度，智能切换暗黑模式
 function getLuminance(hex) {
   let r = parseInt(hex.slice(1, 3), 16) || 0
   let g = parseInt(hex.slice(3, 5), 16) || 0
   let b = parseInt(hex.slice(5, 7), 16) || 0
-  // 相对亮度公式 (Relative Luminance)
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255
 }
 
-const themeOverride = ref(null) // 🌓 新增：记录用户的手动选择
+const themeOverride = ref(null) 
 
 const isDarkMode = computed(() => {
-  // 1. 如果用户手动点击过，优先强制听用户的
   if (themeOverride.value !== null) return themeOverride.value === 'dark'
-  
-  // 2. 否则，保持原有的智能色彩亮度自适应
   if (!palette.value.length) return false
   const totalLum = palette.value.reduce((acc, color) => acc + getLuminance(color), 0)
   const avgLum = totalLum / palette.value.length
   return avgLum < 0.5
 })
 
-// 🌓 新增：手动切换主题的触发函数
 function toggleTheme() {
   vibrate(10)
   themeOverride.value = isDarkMode.value ? 'light' : 'dark'
 }
 
-// ⚡️ 移动端极限提速版：跳过 Base64 解析，直接读内存指针
 function compressImage(file, maxWidth = 600) {
   return new Promise((resolve, reject) => {
     const img = new Image()
-    // 核心提速点 1：直接创建本地指针，0 延迟加载
     const objectUrl = URL.createObjectURL(file) 
     img.src = objectUrl
 
     img.onload = () => {
-      URL.revokeObjectURL(objectUrl) // 用完即焚，释放内存防止闪退
-      
+      URL.revokeObjectURL(objectUrl) 
       const canvas = document.createElement('canvas')
       let width = img.width
       let height = img.height
-      
       if (width > maxWidth) {
         height = Math.round((height * maxWidth) / width)
         width = maxWidth
       }
-      
       canvas.width = width
       canvas.height = height
       const ctx = canvas.getContext('2d')
-      
-      // 核心提速点 2：降低插值质量，加快绘制速度，减轻 CPU 负担
       ctx.imageSmoothingEnabled = true
       ctx.imageSmoothingQuality = 'low' 
-      
       ctx.drawImage(img, 0, 0, width, height)
       resolve(canvas.toDataURL('image/webp', 0.6))
     }
@@ -152,9 +134,7 @@ async function fetchVibeFromAI(base64Image, hexColors) {
   try {
     const response = await fetch('/api/vibe', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: "qwen-vl-max",
         response_format: { type: "json_object" }, 
@@ -168,6 +148,7 @@ async function fetchVibeFromAI(base64Image, hexColors) {
       })
     })
     
+    if (!response.ok) throw new Error(`后端接口报错: HTTP ${response.status}`)
     const data = await response.json()
     if (data.choices && data.choices[0]) {
       return JSON.parse(data.choices[0].message.content)
@@ -178,7 +159,6 @@ async function fetchVibeFromAI(base64Image, hexColors) {
   }
 }
 
-// 📸 唤起摄像头与图库
 function openCamera() { vibrate(20); cameraInput.value?.click() }
 function openGallery() { vibrate(20); galleryInput.value?.click() }
 
@@ -186,19 +166,14 @@ async function handleUpload(event) {
   const file = event.target.files?.[0]
   if (!file) return
 
-  themeOverride.value = null // 🌓 新增：每次上传新图片时重置主题选择
-  vibrate([15, 30, 15]) // 扫码启动的震动反馈
+  themeOverride.value = null 
+  vibrate([15, 30, 15]) 
   status.value = 'scanning'
   currentScanTextIndex.value = 0
   
   try {
-    // 路线 A：秒级生成高清无损本地链接，供页面直接渲染
     displayImageUrl.value = URL.createObjectURL(file)
-    
-    // ⚡️ 核心提速点 3：强制让出主线程 50 毫秒，让手机先把扫描动画渲染出来，避免假死
     await new Promise(resolve => setTimeout(resolve, 50))
-    
-    // 路线 B：后台静默进行极限压缩，供 AI 解析
     aiPayloadImage.value = await compressImage(file)
   } catch(e) {
     alert('读取图片失败！')
@@ -222,7 +197,6 @@ async function handleUpload(event) {
       if (extractedHex.length > 0) palette.value = extractedHex
     } catch(e) {}
     
-    // 发给 AI 的是极限压缩后的 aiPayloadImage
     return await fetchVibeFromAI(aiPayloadImage.value, extractedHex)
   })()
 
@@ -232,7 +206,7 @@ async function handleUpload(event) {
       playlistName.value = aiResult.playlistName || '未知的情绪波段'
       bilingualCopy.value = aiResult.bilingualCopy || '无法解析的氛围 / Unresolved vibe.'
       emojis.value = aiResult.emojis || ['✨', '🤍', '🌫️']
-      vibrate([20, 50]) // 成功震动
+      vibrate([20, 50]) 
     }
   } catch (e) {
   } finally {
@@ -241,7 +215,6 @@ async function handleUpload(event) {
   }
 }
 
-// 🔄 4. 灵感刷新 (无缝重新请求 AI)
 async function regenerateVibe() {
   if (isRegenerating.value || !aiPayloadImage.value) return 
   vibrate(15)
@@ -253,21 +226,18 @@ async function regenerateVibe() {
       playlistName.value = aiResult.playlistName || playlistName.value
       bilingualCopy.value = aiResult.bilingualCopy || bilingualCopy.value
       emojis.value = aiResult.emojis || emojis.value
-      vibrate([15, 30]) // 刷新成功震动
+      vibrate([15, 30]) 
     }
   } finally {
     isRegenerating.value = false
   }
 }
 
-
-// 👁️ 5. 新增：预览模式状态控制
-// 只要在“保存中”或者“预览页”，卡片就进入纯净的只读模式，隐藏所有操作按钮
 const isCardReadonly = computed(() => isSaving.value || status.value === 'preview')
 
 function goToPreview() {
   vibrate(10)
-  document.activeElement?.blur() // 强制收起键盘并取消焦点
+  document.activeElement?.blur() 
   status.value = 'preview'
 }
 
@@ -277,27 +247,30 @@ function goBackToEdit() {
 }
 
 async function saveCard() {
-  if (!cardRef.value || isSaving.value) return
+  // 💡 3. 核心变化：截图时，向子组件内部请求真实的 DOM 节点
+  if (!vibeCardRef.value || isSaving.value) return
   vibrate(15)
   isSaving.value = true
   document.activeElement?.blur()
   
   try {
     await new Promise(resolve => setTimeout(resolve, 300))
+    
+    const targetDOM = vibeCardRef.value.cardElement // 获取子组件暴露的 DOM
 
     const captureOptions = {
       pixelRatio: 3, 
-      backgroundColor: isDarkMode.value ? '#111827' : '#F9FAFB', // 保存时背景色智能匹配
+      backgroundColor: isDarkMode.value && currentTemplate.value === 'classic' ? '#111827' : '#F9FAFB', // 智能切换背景色
       style: { transform: 'scale(1)' }
     }
 
-    try { await toBlob(cardRef.value, captureOptions) } catch (e) {}
+    try { await toBlob(targetDOM, captureOptions) } catch (e) {}
 
-    const blob = await toBlob(cardRef.value, captureOptions)
+    const blob = await toBlob(targetDOM, captureOptions)
     if (!blob) throw new Error('DOM 渲染 Blob 失败')
 
-    vibrate([30, 50]) // 截图成功震动
-    addToDiary() // 保存时自动添加到日记本
+    vibrate([30, 50]) 
+    addToDiary() 
     const fileName = `VibeCard_${Date.now()}.png`
     const file = new File([blob], fileName, { type: 'image/png' })
 
@@ -323,7 +296,6 @@ function reset() {
   themeOverride.value = null 
   status.value = 'idle'
   
-  // 新增：释放高清图片的内存，并清空变量
   if (displayImageUrl.value) {
     URL.revokeObjectURL(displayImageUrl.value)
     displayImageUrl.value = ''
@@ -399,94 +371,31 @@ onBeforeUnmount(() => { if (scanInterval) clearInterval(scanInterval) })
       </div>
 
       <div v-else-if="status === 'result' || status === 'preview'" class="flex w-full flex-col items-center animate-fade-in">
-        <article
-          ref="cardRef"
-          class="relative w-full rounded-[2.5rem] border p-6 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.1)] backdrop-blur-xl transition-colors duration-700"
-          :class="isDarkMode ? 'bg-gray-900/80 border-white/10' : 'bg-white/60 border-white/50'"
-        >
-          <button 
-            v-if="!isCardReadonly"
-            @click="toggleTheme"
-            class="absolute top-5 left-5 p-2 rounded-full transition-all active:scale-90"
-            :class="[isDarkMode ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-black/5 text-gray-400']"
-          >
-            <svg v-if="isDarkMode" class="h-[1.1rem] w-[1.1rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
-            <svg v-else class="h-[1.1rem] w-[1.1rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
-          </button>
-          
-          <button 
-            v-if="!isCardReadonly"
-            @click="regenerateVibe"
-            class="absolute top-5 right-5 p-2 rounded-full transition-all active:scale-90"
-            :class="[isDarkMode ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-black/5 text-gray-400']"
-          >
-            <svg v-if="!isRegenerating" class="h-[1.1rem] w-[1.1rem]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-            <svg v-else class="h-[1.1rem] w-[1.1rem] animate-spin text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-opacity="0.25" /><path d="M12 2a10 10 0 0 1 10 10" /></svg>
-          </button>
+        
+        <VibeCard
+          ref="vibeCardRef"
+          :templateType="currentTemplate"
+          :image="displayImageUrl"
+          v-model:palette="palette"
+          v-model:playlistName="playlistName"
+          v-model:bilingualCopy="bilingualCopy"
+          v-model:emojis="emojis"
+          :isDarkMode="isDarkMode"
+          :isCardReadonly="isCardReadonly"
+          :isRegenerating="isRegenerating"
+          :status="status"
+          @toggleTheme="toggleTheme"
+          @regenerate="regenerateVibe"
+        />
 
-          <div class="mb-5 flex justify-center">
-             <span class="text-[0.6rem] tracking-widest uppercase font-mono" :class="isDarkMode ? 'text-gray-500' : 'text-gray-400'">Vibe Card</span>
-          </div>
+        <div v-if="!isCardReadonly" class="mt-6 flex gap-2 p-1.5 rounded-full transition-colors" :class="isDarkMode ? 'bg-white/10' : 'bg-black/5'">
+          <button @click="currentTemplate = 'classic'; vibrate(10)" class="px-5 py-1.5 rounded-full text-xs font-medium transition-all" :class="currentTemplate === 'classic' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">经典</button>
+          <button @click="currentTemplate = 'polaroid'; vibrate(10)" class="px-5 py-1.5 rounded-full text-xs font-medium transition-all" :class="currentTemplate === 'polaroid' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">拍立得</button>
+          <button @click="currentTemplate = 'magazine'; vibrate(10)" class="px-5 py-1.5 rounded-full text-xs font-medium transition-all" :class="currentTemplate === 'magazine' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">杂志</button>
+        </div>
 
-          <img :src="displayImageUrl" crossorigin="anonymous" class="h-72 w-full rounded-[1.5rem] object-cover shadow-sm" />
-
-          <div class="mt-6 flex h-10 w-full overflow-hidden rounded-xl shadow-inner border" :class="isDarkMode ? 'border-white/10' : 'border-black/5'">
-            <div v-for="(color, index) in palette" :key="`block-${index}`" class="relative flex-1 transition-colors duration-300" :style="{ backgroundColor: color }">
-              <input v-if="status === 'result'" type="color" :value="color" @input="palette[index] = $event.target.value.toUpperCase(); vibrate(10)" class="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
-            </div>
-            
-            <button v-if="palette.length < 7 && !isCardReadonly" @click="palette.push('#E5E7EB'); vibrate(15)" class="flex w-8 items-center justify-center transition-colors active:scale-90" :class="isDarkMode ? 'bg-white/10 text-gray-400 hover:bg-white/20' : 'bg-black/5 text-gray-400 hover:bg-black/10'">
-              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
-            </button>
-          </div>
-
-          <div class="mt-2 flex w-full px-1 text-[0.65rem] font-serif" :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'">
-            <div v-for="(color, index) in palette" :key="`label-${index}`" class="flex-1 flex justify-center items-center">
-              <span class="tracking-[0.15em] opacity-80">{{ getChineseColorName(color) }}</span>
-              <button v-if="palette.length > 2 && !isCardReadonly" @click="palette.splice(index, 1); vibrate(15)" class="ml-[2px] pb-[1px] text-[0.6rem] hover:text-red-400 transition-all font-sans">&times;</button>
-            </div>
-            <div v-if="palette.length < 7 && !isCardReadonly" class="w-8"></div>
-          </div>
-
-          <div class="px-2 pb-2 pt-8 text-center transition-colors duration-500">
-            <h2 
-              class="font-serif text-[1.35rem] font-medium tracking-wide leading-relaxed outline-none rounded-lg px-2 py-1 transition-colors"
-              :class="[
-                isDarkMode ? 'text-gray-100' : 'text-gray-900',
-                status === 'result' ? (isDarkMode ? 'focus:bg-white/10 cursor-text' : 'focus:bg-black/5 cursor-text') : ''
-              ]"
-              :contenteditable="status === 'result'" spellcheck="false"
-              @blur="playlistName = $event.target.innerText; vibrate(10)" @keydown.enter.prevent="$event.target.blur()"
-            >{{ playlistName }}</h2>
-            
-            <p 
-              class="mx-auto mt-2 max-w-[16rem] text-xs leading-relaxed font-light outline-none rounded-lg px-2 py-1 transition-colors"
-              :class="[
-                isDarkMode ? 'text-gray-400' : 'text-gray-500',
-                status === 'result' ? (isDarkMode ? 'focus:bg-white/10 cursor-text' : 'focus:bg-black/5 cursor-text') : ''
-              ]"
-              :contenteditable="status === 'result'" spellcheck="false" @blur="bilingualCopy = $event.target.innerText; vibrate(10)"
-            >{{ bilingualCopy }}</p>
-            
-            <div class="mt-6 flex justify-center items-center gap-4 text-xl opacity-80 filter grayscale-[20%]">
-              <span 
-                v-for="(emoji, index) in emojis" :key="`emoji-${index}`"
-                class="outline-none rounded-lg px-1 py-0.5 transition-all min-w-[1.5rem] text-center"
-                :class="status === 'result' ? (isDarkMode ? 'focus:bg-white/10 cursor-text' : 'focus:bg-black/5 cursor-text') : ''"
-                :contenteditable="status === 'result'" spellcheck="false"
-                @blur="$event.target.innerText.trim() ? (emojis[index] = $event.target.innerText.trim()) : emojis.splice(index, 1); vibrate(10)"
-                @keydown.enter.prevent="$event.target.blur()"
-              >{{ emoji }}</span>
-              
-              <button v-if="emojis.length < 6 && !isCardReadonly" @click="emojis.push('✨'); vibrate(15)" class="flex items-center justify-center text-gray-400 hover:scale-110 active:scale-90 transition-all">
-                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
-              </button>
-            </div>
-          </div>
-        </article>
-
-        <p v-if="status === 'result'" class="mt-5 text-[0.55rem] tracking-[0.1em] text-center animate-pulse" :class="isDarkMode ? 'text-gray-500' : 'text-gray-400'">
-          ✨ 点击文字/色块修改，左上角切换明暗
+        <p v-if="status === 'result'" class="mt-4 text-[0.55rem] tracking-[0.1em] text-center animate-pulse" :class="isDarkMode ? 'text-gray-500' : 'text-gray-400'">
+          ✨ 点击文案/色块修改，左上角切换明暗
         </p>
         <p v-else class="mt-5 text-[0.55rem] tracking-[0.1em] text-center" :class="isDarkMode ? 'text-gray-500' : 'text-gray-400'">
           👁️ 预览模式：保存后的卡片效果如上所示
@@ -524,8 +433,8 @@ onBeforeUnmount(() => { if (scanInterval) clearInterval(scanInterval) })
           >上一步</button>
         </div>
       </div>
+      
       <div v-else-if="status === 'diary'" class="flex w-full h-[85vh] flex-col animate-fade-in relative z-10">
-        
         <div class="flex justify-between items-center mb-6 px-2">
           <div class="flex flex-col">
             <h2 class="font-serif text-2xl tracking-widest text-gray-900">情绪手账</h2>
@@ -538,13 +447,10 @@ onBeforeUnmount(() => { if (scanInterval) clearInterval(scanInterval) })
           <div v-if="!diaryList.length" class="text-center text-xs mt-32 opacity-50 font-light tracking-widest text-gray-500">
             暂无记录，去捕捉你的第一道光影吧。
           </div>
-          
           <div v-for="item in diaryList" :key="item.id" 
                class="p-4 rounded-[1.5rem] flex gap-4 backdrop-blur-xl border shadow-sm transition-all hover:scale-[1.02]"
                :class="item.isDark ? 'bg-gray-900/70 border-white/10 text-gray-200' : 'bg-white/60 border-white/50 text-gray-800'">
-            
             <img :src="item.image" class="w-20 h-24 object-cover rounded-xl shadow-sm opacity-90" />
-            
             <div class="flex flex-col flex-1 justify-between py-1 overflow-hidden">
               <div>
                 <div class="text-[0.6rem] opacity-60 font-mono mb-1.5">{{ item.date }}</div>
@@ -552,7 +458,6 @@ onBeforeUnmount(() => { if (scanInterval) clearInterval(scanInterval) })
                   {{ item.playlistName }}
                 </div>
               </div>
-              
               <div class="flex h-2.5 w-full rounded-md overflow-hidden mt-3 opacity-90 shadow-inner">
                 <div v-for="c in item.palette" :key="c" :style="{ backgroundColor: c }" class="flex-1"></div>
               </div>
