@@ -9,7 +9,10 @@ const galleryInput = ref(null)
 const cardRef = ref(null)
 
 const status = ref('idle')
-const imageUrl = ref('')
+// 🖼️ 1. 用于界面高清展示和最终保存的本地原图指针
+const displayImageUrl = ref('') 
+// 🤖 2. 用于发给 AI 解析的极度压缩（马赛克）图片 Base64
+const aiPayloadImage = ref('')
 const isSaving = ref(false)
 const isRegenerating = ref(false) // 🔄 灵感刷新状态
 
@@ -58,8 +61,8 @@ function toggleTheme() {
   themeOverride.value = isDarkMode.value ? 'light' : 'dark'
 }
 
-// --- 图片压缩与 AI 调用保持不变 ---
-function compressImage(file, maxWidth = 1500) {
+// 压缩至极致体积，专供 AI 读取（不影响页面展示）
+function compressImage(file, maxWidth = 600) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.readAsDataURL(file)
@@ -78,7 +81,8 @@ function compressImage(file, maxWidth = 1500) {
         canvas.height = height
         const ctx = canvas.getContext('2d')
         ctx.drawImage(img, 0, 0, width, height)
-        resolve(canvas.toDataURL('image/jpeg', 0.95))
+        // 核心优化：改为 webp 格式，质量 0.6，体积缩小数十倍
+        resolve(canvas.toDataURL('image/webp', 0.6))
       }
       img.onerror = e => reject(e)
     }
@@ -101,7 +105,7 @@ async function fetchVibeFromAI(base64Image, hexColors) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: "qwen-vl-plus",
+        model: "qwen-vl-max",
         response_format: { type: "json_object" }, 
         messages: [{
           role: "user",
@@ -137,7 +141,10 @@ async function handleUpload(event) {
   currentScanTextIndex.value = 0
   
   try {
-    imageUrl.value = await compressImage(file)
+    // 路线 A：秒级生成高清无损本地链接，供页面直接渲染
+    displayImageUrl.value = URL.createObjectURL(file)
+    // 路线 B：后台静默进行极限压缩，供 AI 解析
+    aiPayloadImage.value = await compressImage(file)
   } catch(e) {
     alert('读取图片失败！')
     return
@@ -152,14 +159,17 @@ async function handleUpload(event) {
   const dataPipeline = (async () => {
     let extractedHex = []
     try {
-      const colors = await extractColors(imageUrl.value)
+      // 提取颜色用高清图，保证色彩精准度
+      const colors = await extractColors(displayImageUrl.value)
       extractedHex = colors.slice(0, 5).map(c => c.hex.toUpperCase())
       while (extractedHex.length < 5 && extractedHex.length > 0) {
         extractedHex.push(extractedHex[extractedHex.length - 1])
       }
       if (extractedHex.length > 0) palette.value = extractedHex
     } catch(e) {}
-    return await fetchVibeFromAI(imageUrl.value, extractedHex)
+    
+    // 发给 AI 的是极限压缩后的 aiPayloadImage
+    return await fetchVibeFromAI(aiPayloadImage.value, extractedHex)
   })()
 
   try {
@@ -179,12 +189,12 @@ async function handleUpload(event) {
 
 // 🔄 4. 灵感刷新 (无缝重新请求 AI)
 async function regenerateVibe() {
-  if (isRegenerating.value || !imageUrl.value) return
+  if (isRegenerating.value || !aiPayloadImage.value) return 
   vibrate(15)
   isRegenerating.value = true
   
   try {
-    const aiResult = await fetchVibeFromAI(imageUrl.value, palette.value)
+    const aiResult = await fetchVibeFromAI(aiPayloadImage.value, palette.value) 
     if (aiResult) {
       playlistName.value = aiResult.playlistName || playlistName.value
       bilingualCopy.value = aiResult.bilingualCopy || bilingualCopy.value
@@ -255,8 +265,16 @@ async function saveCard() {
 
 function reset() {
   vibrate(10)
-  themeOverride.value = null // 🌓 新增：重选时，重置为智能模式
+  themeOverride.value = null 
   status.value = 'idle'
+  
+  // 新增：释放高清图片的内存，并清空变量
+  if (displayImageUrl.value) {
+    URL.revokeObjectURL(displayImageUrl.value)
+    displayImageUrl.value = ''
+  }
+  aiPayloadImage.value = ''
+  
   if (cameraInput.value) cameraInput.value.value = ''
   if (galleryInput.value) galleryInput.value.value = ''
 }
@@ -272,8 +290,8 @@ onBeforeUnmount(() => { if (scanInterval) clearInterval(scanInterval) })
       <div class="absolute bottom-[-10%] left-[20%] w-[35rem] h-[35rem] bg-purple-200/30 rounded-full mix-blend-multiply filter blur-[100px] animate-blob" style="animation-delay: 4s;"></div>
     </div>
 
-    <div v-if="status !== 'idle' && imageUrl" class="absolute inset-0 transition-opacity duration-1000 opacity-100">
-      <img :src="imageUrl" class="absolute inset-0 w-full h-full object-cover scale-110 opacity-30" alt="bg-blur" />
+    <div v-if="status !== 'idle' && displayImageUrl" class="absolute inset-0 transition-opacity duration-1000 opacity-100">
+      <img :src="displayImageUrl" class="absolute inset-0 w-full h-full object-cover scale-110 opacity-30" alt="bg-blur" />
       <div class="absolute inset-0 backdrop-blur-3xl bg-white/50" :class="isDarkMode ? 'bg-black/70' : 'bg-white/50'"></div>
     </div>
   </div>
@@ -306,7 +324,7 @@ onBeforeUnmount(() => { if (scanInterval) clearInterval(scanInterval) })
 
       <div v-else-if="status === 'scanning'" class="flex w-full flex-col items-center gap-10">
         <div class="relative w-64 h-[22rem] overflow-hidden rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-white/60">
-          <img :src="imageUrl" class="h-full w-full object-cover" />
+          <img :src="displayImageUrl" class="h-full w-full object-cover" />
           <div class="absolute inset-0 bg-black/10"></div>
           <div class="scan-line absolute left-0 right-0 top-0 h-32"></div>
         </div>
@@ -349,7 +367,7 @@ onBeforeUnmount(() => { if (scanInterval) clearInterval(scanInterval) })
              <span class="text-[0.6rem] tracking-widest uppercase font-mono" :class="isDarkMode ? 'text-gray-500' : 'text-gray-400'">Vibe Card</span>
           </div>
 
-          <img :src="imageUrl" crossorigin="anonymous" class="h-72 w-full rounded-[1.5rem] object-cover shadow-sm" />
+          <img :src="displayImageUrl" crossorigin="anonymous" class="h-72 w-full rounded-[1.5rem] object-cover shadow-sm" />
 
           <div class="mt-6 flex h-10 w-full overflow-hidden rounded-xl shadow-inner border" :class="isDarkMode ? 'border-white/10' : 'border-black/5'">
             <div v-for="(color, index) in palette" :key="`block-${index}`" class="relative flex-1 transition-colors duration-300" :style="{ backgroundColor: color }">
