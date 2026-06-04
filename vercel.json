@@ -1,7 +1,6 @@
 {
   "functions": {
     "api/**/*": {
-      "region": "hkg1",
       "maxDuration": 60
     }
   }
