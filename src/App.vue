@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { toBlob } from 'html-to-image'
 import { extractColors } from 'extract-colors'
-import { getChineseColorName } from './utils/color'
+import { getChineseColorName,getVibeCopy } from './utils/color'
 
 // 💡 1. 核心变化：在这里引入你刚刚写的外部组件！
 import VibeCard from './components/VibeCard.vue'
@@ -13,11 +13,40 @@ const galleryInput = ref(null)
 // 💡 2. 核心变化：将以前的 cardRef 改为 vibeCardRef，并新增模板状态
 const vibeCardRef = ref(null) 
 const currentTemplate = ref('classic') 
-
+const currentRatio = ref('3:4')
 const status = ref('idle')
 
 // 📖 6. 情绪手账 (Vibe Diary) 状态与逻辑
 const diaryList = ref([])
+const vibeReport = computed(() => {
+  if (diaryList.value.length === 0) return null
+
+  // 1. 统计颜色频次
+  let colorCounts = {}
+  diaryList.value.forEach(item => {
+    item.palette.forEach(hex => {
+      const name = getChineseColorName(hex)
+      colorCounts[name] = (colorCounts[name] || 0) + 1
+    })
+  })
+
+  // 2. 找出主打色
+  let dominantColor = ''
+  let maxCount = 0
+  for (const [name, count] of Object.entries(colorCounts)) {
+    if (count > maxCount) {
+      maxCount = count
+      dominantColor = name
+    }
+  }
+
+  // 3. 直接调用 color.js 里的方法获取专属文案
+  return {
+    colorName: dominantColor,
+    copy: getVibeCopy(dominantColor),
+    count: diaryList.value.length
+  }
+})
 
 function openDiary() {
   vibrate(10)
@@ -28,6 +57,7 @@ function openDiary() {
   status.value = 'diary'
 }
 
+// 保存卡片时，自动记录到日记本
 function addToDiary() {
   if (diaryList.value.length > 0 && diaryList.value[0].image === aiPayloadImage.value) return
 
@@ -48,10 +78,32 @@ function addToDiary() {
   }
   
   currentList.unshift(newItem) 
-  if (currentList.length > 50) currentList.pop()
   
-  localStorage.setItem('vibe_diary', JSON.stringify(currentList))
-  diaryList.value = currentList
+  // 💡 优化 1：将上限从原本的 50 条减少到 15 条，这是 5MB 空间极其安全的阈值
+  if (currentList.length > 15) {
+    currentList = currentList.slice(0, 15)
+  }
+  
+  // 💡 优化 2：增加 try...catch 兜底拦截，防止因为爆盘导致整个 App 崩溃
+  try {
+    localStorage.setItem('vibe_diary', JSON.stringify(currentList))
+    diaryList.value = currentList
+  } catch (e) {
+    // 如果依然超限（例如用户之前已经存满了 50 条旧数据），执行紧急自我清理
+    if (e.name === 'QuotaExceededError' || e.message.includes('quota') || e.message.includes('Quota')) {
+      console.warn('本地存储已满，触发自动清理机制')
+      
+      // 抛弃多余的最老记录，强制压缩到 10 条腾出空间
+      currentList = currentList.slice(0, 10)
+      try {
+        localStorage.setItem('vibe_diary', JSON.stringify(currentList))
+        diaryList.value = currentList
+      } catch (err) {
+        // 如果连 10 条都存不下（极端情况），在控制台静默记录，不阻断用户的卡片保存流程
+        console.error('存储彻底失败:', err)
+      }
+    }
+  }
 }
 
 const displayImageUrl = ref('') 
@@ -376,6 +428,7 @@ onBeforeUnmount(() => { if (scanInterval) clearInterval(scanInterval) })
         <VibeCard
           ref="vibeCardRef"
           :templateType="currentTemplate"
+          :aspectRatio="currentRatio"
           :image="displayImageUrl"
           v-model:palette="palette"
           v-model:playlistName="playlistName"
@@ -393,6 +446,11 @@ onBeforeUnmount(() => { if (scanInterval) clearInterval(scanInterval) })
           <button @click="currentTemplate = 'classic'; vibrate(10)" class="px-5 py-1.5 rounded-full text-xs font-medium transition-all" :class="currentTemplate === 'classic' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">经典</button>
           <button @click="currentTemplate = 'polaroid'; vibrate(10)" class="px-5 py-1.5 rounded-full text-xs font-medium transition-all" :class="currentTemplate === 'polaroid' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">拍立得</button>
           <button @click="currentTemplate = 'magazine'; vibrate(10)" class="px-5 py-1.5 rounded-full text-xs font-medium transition-all" :class="currentTemplate === 'magazine' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">杂志</button>
+        </div>
+        <div v-if="!isCardReadonly" class="mt-3 flex gap-2 p-1.5 rounded-full transition-colors" :class="isDarkMode ? 'bg-white/10' : 'bg-black/5'">
+          <button @click="currentRatio = '1:1'; vibrate(10)" class="px-5 py-1.5 rounded-full text-xs font-medium transition-all" :class="currentRatio === '1:1' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">1:1</button>
+          <button @click="currentRatio = '3:4'; vibrate(10)" class="px-5 py-1.5 rounded-full text-xs font-medium transition-all" :class="currentRatio === '3:4' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">3:4</button>
+          <button @click="currentRatio = '9:16'; vibrate(10)" class="px-5 py-1.5 rounded-full text-xs font-medium transition-all" :class="currentRatio === '9:16' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">9:16</button>
         </div>
 
         <p v-if="status === 'result'" class="mt-4 text-[0.55rem] tracking-[0.1em] text-center animate-pulse" :class="isDarkMode ? 'text-gray-500' : 'text-gray-400'">
@@ -445,6 +503,15 @@ onBeforeUnmount(() => { if (scanInterval) clearInterval(scanInterval) })
         </div>
         
         <div class="flex-1 overflow-y-auto px-1 pb-10 space-y-5" style="scrollbar-width: none;">
+          
+          <div v-if="vibeReport" class="p-5 rounded-[1.5rem] bg-gradient-to-br from-indigo-500/10 to-purple-500/10 border border-indigo-500/20 backdrop-blur-md mb-2 shadow-sm transition-all">
+            <h3 class="text-[0.65rem] font-mono tracking-widest text-indigo-500/80 mb-2 uppercase">Vibe Insights</h3>
+            <p class="text-[0.8rem] text-gray-700 leading-relaxed font-serif" :class="isDarkMode ? 'text-gray-200' : 'text-gray-700'">
+              在最近的 {{ vibeReport.count }} 个瞬间里，你的主打色是 <span class="font-bold text-indigo-500">#{{ vibeReport.colorName }}</span>。<br/>
+              <span class="opacity-80 text-[0.7rem] italic mt-1 inline-block">{{ vibeReport.copy }}</span>
+            </p>
+          </div>
+          
           <div v-if="!diaryList.length" class="text-center text-xs mt-32 opacity-50 font-light tracking-widest text-gray-500">
             暂无记录，去捕捉你的第一道光影吧。
           </div>

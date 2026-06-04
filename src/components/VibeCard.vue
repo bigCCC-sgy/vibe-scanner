@@ -1,9 +1,10 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { getChineseColorName } from '../utils/color'
 
 const props = defineProps({
   templateType: { type: String, default: 'classic' }, 
+  aspectRatio: { type: String, default: '3:4' },
   image: String,
   palette: Array,
   playlistName: String,
@@ -19,7 +20,19 @@ const emit = defineEmits([
   'update:playlistName', 'update:bilingualCopy', 'update:emojis', 'update:palette', 
   'toggleTheme', 'regenerate'
 ])
-
+const imageRatioClass = computed(() => {
+  switch(props.aspectRatio) {
+    case '1:1': return 'aspect-square h-auto'
+    case '9:16': return 'aspect-[9/16] h-auto'
+    case '3:4': 
+    default: return 'aspect-[3/4] h-auto'
+  }
+})
+function vibrate(pattern = 10) {
+  if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+    try { navigator.vibrate(pattern) } catch(e) {}
+  }
+}
 const cardElement = ref(null)
 // 暴露给父组件截图用
 defineExpose({ cardElement })
@@ -50,8 +63,7 @@ function vibrate(pattern = 10) {
       <div class="mb-5 flex justify-center">
          <span class="text-[0.6rem] tracking-widest uppercase font-mono" :class="isDarkMode ? 'text-gray-500' : 'text-gray-400'">Vibe Card</span>
       </div>
-      <img :src="image" crossorigin="anonymous" class="h-72 w-full rounded-[1.5rem] object-cover shadow-sm" />
-
+        <img :src="image" crossorigin="anonymous" :class="[imageRatioClass, 'w-full rounded-[1.5rem] object-cover shadow-sm']" />
       <div class="mt-6 flex h-10 w-full overflow-hidden rounded-xl shadow-inner border" :class="isDarkMode ? 'border-white/10' : 'border-black/5'">
         <div v-for="(color, index) in palette" :key="`block-${index}`" class="relative flex-1 transition-colors duration-300" :style="{ backgroundColor: color }">
           <input v-if="status === 'result'" type="color" :value="color" @input="palette[index] = $event.target.value.toUpperCase(); emit('update:palette', palette); vibrate(10)" class="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
@@ -91,9 +103,7 @@ function vibrate(pattern = 10) {
     </div>
 
     <div v-else-if="templateType === 'polaroid'" class="w-full bg-[#F9F8F5] p-4 pb-16 shadow-[0_20px_50px_rgba(0,0,0,0.15)] rounded-sm border border-gray-200/60 relative">
-      <img :src="image" crossorigin="anonymous" class="w-full aspect-[4/5] object-cover filter contrast-[1.05] sepia-[.1] shadow-inner" />
-      
-      <div class="mt-8 flex flex-col items-center px-4">
+        <img :src="image" crossorigin="anonymous" :class="[imageRatioClass, 'w-full object-cover filter contrast-[1.05] sepia-[.1] shadow-inner']" />      <div class="mt-8 flex flex-col items-center px-4">
         <h2 class="font-sans text-xl text-gray-800 tracking-wider text-center outline-none" :contenteditable="!isCardReadonly" spellcheck="false" @blur="emit('update:playlistName', $event.target.innerText)">{{ playlistName }}</h2>
         <p class="text-[0.65rem] text-gray-500 mt-3 text-center leading-relaxed outline-none" :contenteditable="!isCardReadonly" spellcheck="false" @blur="emit('update:bilingualCopy', $event.target.innerText)">{{ bilingualCopy }}</p>
         
@@ -102,8 +112,7 @@ function vibrate(pattern = 10) {
         </div>
       </div>
     </div>
-
-    <div v-else-if="templateType === 'magazine'" class="relative w-full aspect-[3/4] rounded-[1rem] overflow-hidden shadow-2xl">
+    <div v-else-if="templateType === 'magazine'" :class="[imageRatioClass, 'relative w-full rounded-[1rem] overflow-hidden shadow-2xl']">
       <img :src="image" crossorigin="anonymous" class="absolute inset-0 w-full h-full object-cover scale-105" />
       <div class="absolute inset-0 bg-gradient-to-t from-black/95 via-black/30 to-transparent"></div>
       
