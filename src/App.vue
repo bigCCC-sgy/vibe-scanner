@@ -168,7 +168,7 @@ async function fetchVibeFromAI(base64Image, hexColors) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: "qwen-vl-plus",
+        model: "qwen3.7-plus",//大模型
         response_format: { type: "json_object" }, 
         messages: [{
           role: "user",
