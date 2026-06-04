@@ -9,6 +9,51 @@ const galleryInput = ref(null)
 const cardRef = ref(null)
 
 const status = ref('idle')
+
+// 📖 6. 情绪手账 (Vibe Diary) 状态与逻辑
+const diaryList = ref([])
+
+// 打开日记本并读取本地缓存
+function openDiary() {
+  vibrate(10)
+  const stored = localStorage.getItem('vibe_diary')
+  if (stored) {
+    try { diaryList.value = JSON.parse(stored) } catch(e) { diaryList.value = [] }
+  }
+  status.value = 'diary'
+}
+
+// 保存卡片时，自动记录到日记本
+function addToDiary() {
+  // 防抖：防止同一张卡片重复保存
+  if (diaryList.value.length > 0 && diaryList.value[0].image === aiPayloadImage.value) return
+
+  const stored = localStorage.getItem('vibe_diary')
+  let currentList = []
+  if (stored) {
+    try { currentList = JSON.parse(stored) } catch(e) {}
+  }
+
+  const newItem = {
+    id: Date.now(),
+    date: new Date().toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+    image: aiPayloadImage.value, // 核心技巧：只存极度压缩的 WebP 缩略图，省空间
+    palette: [...palette.value],
+    playlistName: playlistName.value,
+    bilingualCopy: bilingualCopy.value,
+    isDark: isDarkMode.value // 记录当时的主题，让日记列表更好看
+  }
+  
+  currentList.unshift(newItem) // 最新记录插在最前面
+  
+  // 核心保护：最多只保留最近的 50 条记录，防止塞爆 localStorage
+  if (currentList.length > 50) currentList.pop()
+  
+  localStorage.setItem('vibe_diary', JSON.stringify(currentList))
+  diaryList.value = currentList
+}
+
+
 // 🖼️ 1. 用于界面高清展示和最终保存的本地原图指针
 const displayImageUrl = ref('') 
 // 🤖 2. 用于发给 AI 解析的极度压缩（马赛克）图片 Base64
@@ -252,6 +297,7 @@ async function saveCard() {
     if (!blob) throw new Error('DOM 渲染 Blob 失败')
 
     vibrate([30, 50]) // 截图成功震动
+    addToDiary() // 保存时自动添加到日记本
     const fileName = `VibeCard_${Date.now()}.png`
     const file = new File([blob], fileName, { type: 'image/png' })
 
@@ -329,8 +375,14 @@ onBeforeUnmount(() => { if (scanInterval) clearInterval(scanInterval) })
             <span class="text-[0.65rem] tracking-[0.15em] text-gray-500 group-hover:text-gray-800">读取相册</span>
           </button>
         </div>
+        <div class="mt-12 flex justify-center w-full animate-fade-in" style="animation-delay: 0.3s;">
+          <button @click="openDiary" class="flex items-center gap-2 text-[0.7rem] tracking-[0.2em] text-gray-400 hover:text-gray-700 transition-colors uppercase">
+            <svg class="w-4 h-4 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg>
+            我的情绪手账
+          </button>
+        </div>
       </div>
-
+      
       <div v-else-if="status === 'scanning'" class="flex w-full flex-col items-center gap-10">
         <div class="relative w-64 h-[22rem] overflow-hidden rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-white/60">
           <img :src="displayImageUrl" class="h-full w-full object-cover" />
@@ -470,6 +522,42 @@ onBeforeUnmount(() => { if (scanInterval) clearInterval(scanInterval) })
             :class="isDarkMode ? 'border-white/20 bg-gray-900/50 text-gray-300 hover:bg-gray-800' : 'border-gray-900/10 bg-white/50 text-gray-600 hover:bg-white'"
             @click="goBackToEdit"
           >上一步</button>
+        </div>
+      </div>
+      <div v-else-if="status === 'diary'" class="flex w-full h-[85vh] flex-col animate-fade-in relative z-10">
+        
+        <div class="flex justify-between items-center mb-6 px-2">
+          <div class="flex flex-col">
+            <h2 class="font-serif text-2xl tracking-widest text-gray-900">情绪手账</h2>
+            <span class="text-[0.6rem] tracking-[0.2em] text-gray-400 uppercase mt-1">Vibe Diary</span>
+          </div>
+          <button @click="status = 'idle'" class="p-2 text-[0.7rem] tracking-widest text-gray-500 hover:text-gray-800 active:scale-95 transition-all">返回</button>
+        </div>
+        
+        <div class="flex-1 overflow-y-auto px-1 pb-10 space-y-5" style="scrollbar-width: none;">
+          <div v-if="!diaryList.length" class="text-center text-xs mt-32 opacity-50 font-light tracking-widest text-gray-500">
+            暂无记录，去捕捉你的第一道光影吧。
+          </div>
+          
+          <div v-for="item in diaryList" :key="item.id" 
+               class="p-4 rounded-[1.5rem] flex gap-4 backdrop-blur-xl border shadow-sm transition-all hover:scale-[1.02]"
+               :class="item.isDark ? 'bg-gray-900/70 border-white/10 text-gray-200' : 'bg-white/60 border-white/50 text-gray-800'">
+            
+            <img :src="item.image" class="w-20 h-24 object-cover rounded-xl shadow-sm opacity-90" />
+            
+            <div class="flex flex-col flex-1 justify-between py-1 overflow-hidden">
+              <div>
+                <div class="text-[0.6rem] opacity-60 font-mono mb-1.5">{{ item.date }}</div>
+                <div class="font-serif text-sm font-medium leading-tight overflow-hidden text-ellipsis display-webkit-box" style="-webkit-line-clamp: 2; -webkit-box-orient: vertical; display: -webkit-box;">
+                  {{ item.playlistName }}
+                </div>
+              </div>
+              
+              <div class="flex h-2.5 w-full rounded-md overflow-hidden mt-3 opacity-90 shadow-inner">
+                <div v-for="c in item.palette" :key="c" :style="{ backgroundColor: c }" class="flex-1"></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
