@@ -61,32 +61,38 @@ function toggleTheme() {
   themeOverride.value = isDarkMode.value ? 'light' : 'dark'
 }
 
-// 压缩至极致体积，专供 AI 读取（不影响页面展示）
+// ⚡️ 移动端极限提速版：跳过 Base64 解析，直接读内存指针
 function compressImage(file, maxWidth = 600) {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.readAsDataURL(file)
-    reader.onload = (event) => {
-      const img = new Image()
-      img.src = event.target.result
-      img.onload = () => {
-        const canvas = document.createElement('canvas')
-        let width = img.width
-        let height = img.height
-        if (width > maxWidth) {
-          height = Math.round((height * maxWidth) / width)
-          width = maxWidth
-        }
-        canvas.width = width
-        canvas.height = height
-        const ctx = canvas.getContext('2d')
-        ctx.drawImage(img, 0, 0, width, height)
-        // 核心优化：改为 webp 格式，质量 0.6，体积缩小数十倍
-        resolve(canvas.toDataURL('image/webp', 0.6))
+    const img = new Image()
+    // 核心提速点 1：直接创建本地指针，0 延迟加载
+    const objectUrl = URL.createObjectURL(file) 
+    img.src = objectUrl
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl) // 用完即焚，释放内存防止闪退
+      
+      const canvas = document.createElement('canvas')
+      let width = img.width
+      let height = img.height
+      
+      if (width > maxWidth) {
+        height = Math.round((height * maxWidth) / width)
+        width = maxWidth
       }
-      img.onerror = e => reject(e)
+      
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      
+      // 核心提速点 2：降低插值质量，加快绘制速度，减轻 CPU 负担
+      ctx.imageSmoothingEnabled = true
+      ctx.imageSmoothingQuality = 'low' 
+      
+      ctx.drawImage(img, 0, 0, width, height)
+      resolve(canvas.toDataURL('image/webp', 0.6))
     }
-    reader.onerror = e => reject(e)
+    img.onerror = e => reject(e)
   })
 }
 
@@ -143,6 +149,10 @@ async function handleUpload(event) {
   try {
     // 路线 A：秒级生成高清无损本地链接，供页面直接渲染
     displayImageUrl.value = URL.createObjectURL(file)
+    
+    // ⚡️ 核心提速点 3：强制让出主线程 50 毫秒，让手机先把扫描动画渲染出来，避免假死
+    await new Promise(resolve => setTimeout(resolve, 50))
+    
     // 路线 B：后台静默进行极限压缩，供 AI 解析
     aiPayloadImage.value = await compressImage(file)
   } catch(e) {
@@ -159,7 +169,6 @@ async function handleUpload(event) {
   const dataPipeline = (async () => {
     let extractedHex = []
     try {
-      // 提取颜色用高清图，保证色彩精准度
       const colors = await extractColors(displayImageUrl.value)
       extractedHex = colors.slice(0, 5).map(c => c.hex.toUpperCase())
       while (extractedHex.length < 5 && extractedHex.length > 0) {
