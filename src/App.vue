@@ -13,7 +13,6 @@ const galleryInput = ref(null)
 // 💡 2. 核心变化：将以前的 cardRef 改为 vibeCardRef，并新增模板状态
 const vibeCardRef = ref(null) 
 const currentTemplate = ref('classic') 
-const currentRatio = ref('3:4')
 const status = ref('idle')
 
 // 📖 6. 情绪手账 (Vibe Diary) 状态与逻辑
@@ -59,8 +58,6 @@ function openDiary() {
 
 // 保存卡片时，自动记录到日记本
 function addToDiary() {
-  if (diaryList.value.length > 0 && diaryList.value[0].image === aiPayloadImage.value) return
-
   const stored = localStorage.getItem('vibe_diary')
   let currentList = []
   if (stored) {
@@ -428,7 +425,6 @@ onBeforeUnmount(() => { if (scanInterval) clearInterval(scanInterval) })
         <VibeCard
           ref="vibeCardRef"
           :templateType="currentTemplate"
-          :aspectRatio="currentRatio"
           :image="displayImageUrl"
           v-model:palette="palette"
           v-model:playlistName="playlistName"
@@ -446,11 +442,6 @@ onBeforeUnmount(() => { if (scanInterval) clearInterval(scanInterval) })
           <button @click="currentTemplate = 'classic'; vibrate(10)" class="px-5 py-1.5 rounded-full text-xs font-medium transition-all" :class="currentTemplate === 'classic' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">经典</button>
           <button @click="currentTemplate = 'polaroid'; vibrate(10)" class="px-5 py-1.5 rounded-full text-xs font-medium transition-all" :class="currentTemplate === 'polaroid' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">拍立得</button>
           <button @click="currentTemplate = 'magazine'; vibrate(10)" class="px-5 py-1.5 rounded-full text-xs font-medium transition-all" :class="currentTemplate === 'magazine' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">杂志</button>
-        </div>
-        <div v-if="!isCardReadonly" class="mt-3 flex gap-2 p-1.5 rounded-full transition-colors" :class="isDarkMode ? 'bg-white/10' : 'bg-black/5'">
-          <button @click="currentRatio = '1:1'; vibrate(10)" class="px-5 py-1.5 rounded-full text-xs font-medium transition-all" :class="currentRatio === '1:1' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">1:1</button>
-          <button @click="currentRatio = '3:4'; vibrate(10)" class="px-5 py-1.5 rounded-full text-xs font-medium transition-all" :class="currentRatio === '3:4' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">3:4</button>
-          <button @click="currentRatio = '9:16'; vibrate(10)" class="px-5 py-1.5 rounded-full text-xs font-medium transition-all" :class="currentRatio === '9:16' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">9:16</button>
         </div>
 
         <p v-if="status === 'result'" class="mt-4 text-[0.55rem] tracking-[0.1em] text-center animate-pulse" :class="isDarkMode ? 'text-gray-500' : 'text-gray-400'">
