@@ -36,12 +36,6 @@ function vibrate(pattern = 10) {
 const cardElement = ref(null)
 // 暴露给父组件截图用
 defineExpose({ cardElement })
-
-function vibrate(pattern = 10) {
-  if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-    try { navigator.vibrate(pattern) } catch(e) {}
-  }
-}
 </script>
 
 <template>
