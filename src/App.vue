@@ -95,8 +95,6 @@ async function fetchVibeFromAI(base64Image, hexColors) {
 }`
 
   try {
-    // 🎯 核心改变：请求地址变成了我们刚刚写的 api/vibe.js
-    // 不再需要携带 Authorization: Bearer apiKey 了！
     const response = await fetch('/api/vibe', {
       method: 'POST',
       headers: {
