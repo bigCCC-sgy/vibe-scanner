@@ -28,12 +28,51 @@ function vibrate(pattern = 10) {
     try { navigator.vibrate(pattern) } catch(e) {}
   }
 }
+
+// 🚀 核心修复：不直接修改 Props，而是克隆一个新数组修改后发射出去
+function updateColor(index, newColor) {
+  const newPalette = [...props.palette]
+  newPalette[index] = newColor.toUpperCase()
+  emit('update:palette', newPalette)
+  vibrate(10)
+}
+
+function removeColor(index) {
+  const newPalette = [...props.palette]
+  newPalette.splice(index, 1)
+  emit('update:palette', newPalette)
+  vibrate(15)
+}
+
+function addColor() {
+  const newPalette = [...props.palette]
+  newPalette.push('#E5E7EB')
+  emit('update:palette', newPalette)
+  vibrate(15)
+}
+
+function updateEmoji(index, newEmoji) {
+  const newEmojis = [...props.emojis]
+  if (newEmoji) {
+    newEmojis[index] = newEmoji
+  } else {
+    newEmojis.splice(index, 1)
+  }
+  emit('update:emojis', newEmojis)
+  vibrate(10)
+}
+
+function addEmoji() {
+  const newEmojis = [...props.emojis]
+  newEmojis.push('✨')
+  emit('update:emojis', newEmojis)
+  vibrate(15)
+}
 </script>
 
 <template>
   <article ref="cardElement" class="w-full transition-all duration-700 relative">
     
-    <!-- 经典模板：固定高度 h-72 -->
     <div v-if="templateType === 'classic'" 
          class="relative w-full rounded-[2.5rem] border p-6 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.1)] backdrop-blur-xl"
          :class="isDarkMode ? 'bg-gray-900/80 border-white/10' : 'bg-white/60 border-white/50'">
@@ -53,9 +92,9 @@ function vibrate(pattern = 10) {
       <img :src="image" crossorigin="anonymous" class="h-72 w-full rounded-[1.5rem] object-cover shadow-sm" />
       <div class="mt-6 flex h-10 w-full overflow-hidden rounded-xl shadow-inner border" :class="isDarkMode ? 'border-white/10' : 'border-black/5'">
         <div v-for="(color, index) in palette" :key="`block-${index}`" class="relative flex-1 transition-colors duration-300" :style="{ backgroundColor: color }">
-          <input v-if="status === 'result'" type="color" :value="color" @input="palette[index] = $event.target.value.toUpperCase(); emit('update:palette', palette); vibrate(10)" class="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+          <input v-if="status === 'result'" type="color" :value="color" @input="updateColor(index, $event.target.value)" class="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
         </div>
-        <button v-if="palette.length < 7 && !isCardReadonly" @click="palette.push('#E5E7EB'); emit('update:palette', palette); vibrate(15)" class="flex w-8 items-center justify-center transition-colors active:scale-90" :class="isDarkMode ? 'bg-white/10 text-gray-400 hover:bg-white/20' : 'bg-black/5 text-gray-400 hover:bg-black/10'">
+        <button v-if="palette.length < 7 && !isCardReadonly" @click="addColor" class="flex w-8 items-center justify-center transition-colors active:scale-90" :class="isDarkMode ? 'bg-white/10 text-gray-400 hover:bg-white/20' : 'bg-black/5 text-gray-400 hover:bg-black/10'">
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
         </button>
       </div>
@@ -63,7 +102,7 @@ function vibrate(pattern = 10) {
       <div class="mt-2 flex w-full px-1 text-[0.65rem] font-serif" :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'">
         <div v-for="(color, index) in palette" :key="`label-${index}`" class="flex-1 flex justify-center items-center">
           <span class="tracking-[0.15em] opacity-80">{{ getChineseColorName(color) }}</span>
-          <button v-if="palette.length > 2 && !isCardReadonly" @click="palette.splice(index, 1); emit('update:palette', palette); vibrate(15)" class="ml-[2px] pb-[1px] text-[0.6rem] hover:text-red-400 transition-all font-sans">&times;</button>
+          <button v-if="palette.length > 2 && !isCardReadonly" @click="removeColor(index)" class="ml-[2px] pb-[1px] text-[0.6rem] hover:text-red-400 transition-all font-sans">&times;</button>
         </div>
         <div v-if="palette.length < 7 && !isCardReadonly" class="w-8"></div>
       </div>
@@ -78,18 +117,17 @@ function vibrate(pattern = 10) {
             class="outline-none rounded-lg px-1 py-0.5 transition-all min-w-[1.5rem] text-center"
             :class="status === 'result' ? (isDarkMode ? 'focus:bg-white/10 cursor-text' : 'focus:bg-black/5 cursor-text') : ''"
             :contenteditable="!isCardReadonly" spellcheck="false"
-            @blur="$event.target.innerText.trim() ? (emojis[index] = $event.target.innerText.trim()) : emojis.splice(index, 1); emit('update:emojis', emojis); vibrate(10)"
+            @blur="updateEmoji(index, $event.target.innerText.trim())"
             @keydown.enter.prevent="$event.target.blur()"
           >{{ emoji }}</span>
           
-          <button v-if="emojis.length < 6 && !isCardReadonly" @click="emojis.push('✨'); emit('update:emojis', emojis); vibrate(15)" class="flex items-center justify-center text-gray-400 hover:scale-110 active:scale-90 transition-all">
+          <button v-if="emojis.length < 6 && !isCardReadonly" @click="addEmoji" class="flex items-center justify-center text-gray-400 hover:scale-110 active:scale-90 transition-all">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
           </button>
         </div>
       </div>
     </div>
 
-    <!-- 拍立得模板：固定 aspect-[4/5] -->
     <div v-else-if="templateType === 'polaroid'" class="w-full bg-[#F9F8F5] p-4 pb-16 shadow-[0_20px_50px_rgba(0,0,0,0.15)] rounded-sm border border-gray-200/60 relative">
         <img :src="image" crossorigin="anonymous" class="w-full aspect-[4/5] object-cover filter contrast-[1.05] sepia-[.1] shadow-inner" />      
         <div class="mt-8 flex flex-col items-center px-4">
@@ -102,7 +140,6 @@ function vibrate(pattern = 10) {
       </div>
     </div>
 
-    <!-- 杂志模板：固定 aspect-[3/4] -->
     <div v-else-if="templateType === 'magazine'" class="relative w-full aspect-[3/4] rounded-[1rem] overflow-hidden shadow-2xl">
       <img :src="image" crossorigin="anonymous" class="absolute inset-0 w-full h-full object-cover scale-105" />
       <div class="absolute inset-0 bg-gradient-to-t from-black/95 via-black/30 to-transparent"></div>

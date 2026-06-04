@@ -3,14 +3,12 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { toBlob } from 'html-to-image'
 import { extractColors } from 'extract-colors'
 import { getChineseColorName,getVibeCopy } from './utils/color'
-
-// 💡 1. 核心变化：在这里引入你刚刚写的外部组件！
+import { VibeStorage } from './utils/storage'
 import VibeCard from './components/VibeCard.vue'
 
 const cameraInput = ref(null)
 const galleryInput = ref(null)
 
-// 💡 2. 核心变化：将以前的 cardRef 改为 vibeCardRef，并新增模板状态
 const vibeCardRef = ref(null) 
 const currentTemplate = ref('classic') 
 const status = ref('idle')
@@ -47,22 +45,16 @@ const vibeReport = computed(() => {
   }
 })
 
-function openDiary() {
+async function openDiary() {
   vibrate(10)
-  const stored = localStorage.getItem('vibe_diary')
-  if (stored) {
-    try { diaryList.value = JSON.parse(stored) } catch(e) { diaryList.value = [] }
-  }
+  const storedList = await VibeStorage.get('vibe_diary') 
+  diaryList.value = storedList || []
   status.value = 'diary'
 }
 
-// 保存卡片时，自动记录到日记本
-function addToDiary() {
-  const stored = localStorage.getItem('vibe_diary')
-  let currentList = []
-  if (stored) {
-    try { currentList = JSON.parse(stored) } catch(e) {}
-  }
+// 💡 修改：变成 async 函数
+async function addToDiary() {
+  let currentList = await VibeStorage.get('vibe_diary') || []
 
   const newItem = {
     id: Date.now(),
@@ -75,32 +67,22 @@ function addToDiary() {
   }
   
   currentList.unshift(newItem) 
+  if (currentList.length > 15) currentList = currentList.slice(0, 15)
   
-  // 💡 优化 1：将上限从原本的 50 条减少到 15 条，这是 5MB 空间极其安全的阈值
-  if (currentList.length > 15) {
-    currentList = currentList.slice(0, 15)
-  }
-  
-  // 💡 优化 2：增加 try...catch 兜底拦截，防止因为爆盘导致整个 App 崩溃
-  try {
-    localStorage.setItem('vibe_diary', JSON.stringify(currentList))
-    diaryList.value = currentList
-  } catch (e) {
-    // 如果依然超限（例如用户之前已经存满了 50 条旧数据），执行紧急自我清理
-    if (e.name === 'QuotaExceededError' || e.message.includes('quota') || e.message.includes('Quota')) {
-      console.warn('本地存储已满，触发自动清理机制')
-      
-      // 抛弃多余的最老记录，强制压缩到 10 条腾出空间
-      currentList = currentList.slice(0, 10)
-      try {
-        localStorage.setItem('vibe_diary', JSON.stringify(currentList))
-        diaryList.value = currentList
-      } catch (err) {
-        // 如果连 10 条都存不下（极端情况），在控制台静默记录，不阻断用户的卡片保存流程
-        console.error('存储彻底失败:', err)
-      }
+  // 💡 修改：使用 await 写入，并用 while 循环解决爆盘问题
+  let isSaved = false
+  while (!isSaved && currentList.length > 0) {
+    try {
+      await VibeStorage.set('vibe_diary', currentList) // 调用适配器
+      diaryList.value = currentList
+      isSaved = true 
+    } catch (e) {
+      console.warn('存储空间超限，自动丢弃一条最旧的记录...')
+      currentList.pop() 
     }
   }
+
+  if (!isSaved) diaryList.value = [newItem]
 }
 
 const displayImageUrl = ref('') 
@@ -142,6 +124,7 @@ const isDarkMode = computed(() => {
 
 function toggleTheme() {
   vibrate(10)
+  document.activeElement?.blur()
   themeOverride.value = isDarkMode.value ? 'light' : 'dark'
 }
 
@@ -200,7 +183,10 @@ async function fetchVibeFromAI(base64Image, hexColors) {
     if (!response.ok) throw new Error(`后端接口报错: HTTP ${response.status}`)
     const data = await response.json()
     if (data.choices && data.choices[0]) {
-      return JSON.parse(data.choices[0].message.content)
+      let rawContent = data.choices[0].message.content
+      // 🚀 核心修复：用正则强行剥离大模型可能吐出的 markdown 代码块标记
+      rawContent = rawContent.replace(/```json/gi, '').replace(/```/g, '').trim()
+      return JSON.parse(rawContent)
     }
   } catch (e) {
     console.error("AI 接口调用崩溃:", e)
@@ -221,6 +207,9 @@ async function handleUpload(event) {
   currentScanTextIndex.value = 0
   
   try {
+    if (displayImageUrl.value) {
+      URL.revokeObjectURL(displayImageUrl.value)
+    }
     displayImageUrl.value = URL.createObjectURL(file)
     await new Promise(resolve => setTimeout(resolve, 50))
     aiPayloadImage.value = await compressImage(file)
