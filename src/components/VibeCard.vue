@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue'
+import { ref,computed } from 'vue'
 import { getChineseColorName } from '../utils/color'
 
 const props = defineProps({
@@ -67,6 +67,27 @@ function addEmoji() {
   emit('update:emojis', newEmojis)
   vibrate(15)
 }
+
+const formattedCopy = computed(() => {
+  const rawText = props.bilingualCopy || ''
+  const parts = rawText.split('/')
+  return {
+    cn: parts[0] ? parts[0].trim() : rawText,
+    en: parts[1] ? parts[1].trim() : ''
+  }
+})
+
+function updateCn(newCn) {
+  const newCopy = formattedCopy.value.en ? `${newCn} / ${formattedCopy.value.en}` : newCn
+  emit('update:bilingualCopy', newCopy)
+  vibrate(10)
+}
+
+function updateEn(newEn) {
+  const newCopy = newEn ? `${formattedCopy.value.cn} / ${newEn}` : formattedCopy.value.cn
+  emit('update:bilingualCopy', newCopy)
+  vibrate(10)
+}
 </script>
 
 <template>
@@ -112,7 +133,10 @@ function addEmoji() {
 
       <div class="px-2 pb-2 pt-8 text-center">
         <h2 class="font-serif text-[1.35rem] font-medium tracking-wide leading-relaxed outline-none rounded-lg px-2 py-1 transition-colors" :class="[isDarkMode ? 'text-gray-100' : 'text-gray-900', status === 'result' ? (isDarkMode ? 'focus:bg-white/10' : 'focus:bg-black/5') : '']" :contenteditable="!isCardReadonly" spellcheck="false" @blur="emit('update:playlistName', $event.target.innerText); vibrate(10)" @keydown.enter.prevent="$event.target.blur()">{{ playlistName }}</h2>
-        <p class="mx-auto mt-2 max-w-[16rem] text-xs leading-relaxed font-light outline-none rounded-lg px-2 py-1 transition-colors" :class="[isDarkMode ? 'text-gray-400' : 'text-gray-500', status === 'result' ? (isDarkMode ? 'focus:bg-white/10' : 'focus:bg-black/5') : '']" :contenteditable="!isCardReadonly" spellcheck="false" @blur="emit('update:bilingualCopy', $event.target.innerText); vibrate(10)">{{ bilingualCopy }}</p>
+        <div class="mx-auto mt-2 max-w-[16rem] flex flex-col gap-0.5 px-2 py-1 rounded-lg transition-colors" :class="[status === 'result' ? (isDarkMode ? 'hover:bg-white/5' : 'hover:bg-black/5') : '']">
+          <p class="text-xs leading-relaxed font-light outline-none rounded transition-colors" :class="[isDarkMode ? 'text-gray-300 focus:bg-white/10' : 'text-gray-700 focus:bg-black/5']" :contenteditable="!isCardReadonly" spellcheck="false" @blur="updateCn($event.target.innerText)">{{ formattedCopy.cn }}</p>
+          <p v-if="formattedCopy.en" class="text-[0.65rem] leading-relaxed font-light opacity-60 outline-none rounded transition-colors" :class="[isDarkMode ? 'text-gray-400 focus:bg-white/10' : 'text-gray-500 focus:bg-black/5']" :contenteditable="!isCardReadonly" spellcheck="false" @blur="updateEn($event.target.innerText)">{{ formattedCopy.en }}</p>
+        </div>
         
         <div class="mt-6 flex justify-center items-center gap-4 text-xl opacity-80 filter grayscale-[20%]">
           <span 
@@ -138,8 +162,10 @@ function addEmoji() {
         
         <div class="mt-8 flex flex-col items-center px-4">
         <h2 class="font-sans text-xl text-gray-800 tracking-wider text-center outline-none" :contenteditable="!isCardReadonly" spellcheck="false" @blur="emit('update:playlistName', $event.target.innerText)">{{ playlistName }}</h2>
-        <p class="text-[0.65rem] text-gray-500 mt-3 text-center leading-relaxed outline-none" :contenteditable="!isCardReadonly" spellcheck="false" @blur="emit('update:bilingualCopy', $event.target.innerText)">{{ bilingualCopy }}</p>
-        
+        <div class="mt-3 flex flex-col gap-0.5 w-full items-center">
+          <p class="text-[0.65rem] text-gray-600 text-center leading-relaxed outline-none focus:bg-black/5 rounded px-2 transition-colors" :contenteditable="!isCardReadonly" spellcheck="false" @blur="updateCn($event.target.innerText)">{{ formattedCopy.cn }}</p>
+          <p v-if="formattedCopy.en" class="text-[0.55rem] text-gray-400 text-center leading-relaxed outline-none focus:bg-black/5 rounded px-2 transition-colors" :contenteditable="!isCardReadonly" spellcheck="false" @blur="updateEn($event.target.innerText)">{{ formattedCopy.en }}</p>
+        </div>        
         <div class="flex gap-3 mt-8">
           <div v-for="c in palette" :key="c" :style="{backgroundColor: c}" class="w-5 h-5 rounded-full shadow-inner border border-black/10"></div>
         </div>
@@ -158,7 +184,10 @@ function addEmoji() {
         </div>
         
         <h2 class="font-serif text-3xl text-white tracking-widest uppercase mb-3 leading-tight outline-none" :contenteditable="!isCardReadonly" spellcheck="false" @blur="emit('update:playlistName', $event.target.innerText)">{{ playlistName }}</h2>
-        <p class="text-[0.7rem] text-gray-300 font-light outline-none" :contenteditable="!isCardReadonly" spellcheck="false" @blur="emit('update:bilingualCopy', $event.target.innerText)">{{ bilingualCopy }}</p>
+        <div class="flex flex-col gap-0.5">
+          <p class="text-[0.75rem] text-gray-200 font-light outline-none focus:bg-white/10 rounded px-1 w-fit -ml-1 transition-colors" :contenteditable="!isCardReadonly" spellcheck="false" @blur="updateCn($event.target.innerText)">{{ formattedCopy.cn }}</p>
+          <p v-if="formattedCopy.en" class="text-[0.6rem] text-gray-400 font-light outline-none focus:bg-white/10 rounded px-1 w-fit -ml-1 transition-colors" :contenteditable="!isCardReadonly" spellcheck="false" @blur="updateEn($event.target.innerText)">{{ formattedCopy.en }}</p>
+        </div>
       </div>
     </div>
 
