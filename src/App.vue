@@ -1,43 +1,366 @@
 ﻿<script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { toBlob } from 'html-to-image'
 import { extractColors } from 'extract-colors'
-import { getChineseColorName, getVibeCopy } from './utils/color'
+import { getChineseColorName,getVibeCopy } from './utils/color'
 import { VibeStorage } from './utils/storage'
-import DailySummary from './components/DailySummary.vue'
-import SharePanel from './components/SharePanel.vue'
-import SharePoster from './components/SharePoster.vue'
 import VibeCard from './components/VibeCard.vue'
 import VibeDiary from './components/VibeDiary.vue'
 
-const DIARY_KEY = 'vibe_diary'
-const SHARE_SETTINGS_KEY = 'vibe_share_settings'
-const MAX_DIARY_ITEMS = 40
-
-const SHARE_PRESETS = [
-  { key: 'feed', label: '朋友圈', ratio: '3:4' },
-  { key: 'redbook', label: '小红书', ratio: '4:5' },
-  { key: 'square', label: '方图', ratio: '1:1' },
-  { key: 'wallpaper', label: '壁纸', ratio: '9:16' }
-]
-
 const cameraInput = ref(null)
 const galleryInput = ref(null)
-const sharePosterRef = ref(null)
 
-const currentTemplate = ref('classic')
+const vibeCardRef = ref(null) 
+const currentTemplate = ref('classic') 
 const status = ref('idle')
+
+const MAX_DIARY_ITEMS = 30
+
+const COPY_STYLES = [
+  {
+    id: 'classic',
+    name: '克制杂志',
+    promptName: '克制杂志',
+    playlistGuide: '像独立杂志里的音乐栏目，克制、干净、有留白。',
+    copyGuide: '中文短句要高级但不端着，英文自然、有呼吸感。',
+    emojiGuide: '选择低饱和、安静、轻盈的 emoji。'
+  },
+  {
+    id: 'healing',
+    name: '温柔治愈',
+    promptName: '温柔治愈',
+    playlistGuide: '像睡前电台或晨间散步歌单，柔软、安心、带一点光。',
+    copyGuide: '中文要像一句轻声安慰，英文温暖自然，不鸡汤。',
+    emojiGuide: '选择柔和、自然、温暖的 emoji。'
+  },
+  {
+    id: 'film',
+    name: '冷感胶片',
+    promptName: '冷感胶片',
+    playlistGuide: '像低饱和胶片、城市阴天、旧车窗里的歌单名。',
+    copyGuide: '中文短、冷、带画面感；英文像独立电影旁白。',
+    emojiGuide: '选择胶片、城市、雨雾、月光相关的 emoji。'
+  },
+  {
+    id: 'playful',
+    name: '轻微发疯',
+    promptName: '轻微发疯文学',
+    playlistGuide: '像有点离谱但可爱的私人歌单，俏皮、灵动、不低俗。',
+    copyGuide: '中文可以轻微发疯但要短、有趣、不冒犯；英文要像朋友的灵光一闪。',
+    emojiGuide: '选择活泼、意外、有小表情的 emoji。'
+  },
+  {
+    id: 'travel',
+    name: '旅行漫游',
+    promptName: '旅行漫游',
+    playlistGuide: '像车窗、海边、航站楼、陌生街角里的旅行歌单。',
+    copyGuide: '中文有在路上的松弛感，英文像自然的旅行手记。',
+    emojiGuide: '选择路途、天气、地图、海风相关的 emoji。'
+  },
+  {
+    id: 'midnight',
+    name: '夜晚独处',
+    promptName: '夜晚独处',
+    playlistGuide: '像凌晨、房间灯光、城市噪音退后之后的歌单。',
+    copyGuide: '中文安静、私密、略带孤独但不丧；英文自然、低声。',
+    emojiGuide: '选择夜晚、月亮、窗、耳机、微光相关的 emoji。'
+  }
+]
+
+const selectedStyleId = ref('classic')
+
+function getCopyStyle(styleId) {
+  return COPY_STYLES.find(style => style.id === styleId) || COPY_STYLES[0]
+}
+
+const selectedCopyStyle = computed(() => getCopyStyle(selectedStyleId.value))
+
+function selectCopyStyle(styleId) {
+  if (!COPY_STYLES.some(style => style.id === styleId)) return
+  selectedStyleId.value = styleId
+  vibrate(8)
+}
+
 const diaryList = ref([])
-const displayImageUrl = ref('')
+
+function normalizeHexColor(color) {
+  return typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color)
+    ? color.toUpperCase()
+    : ''
+}
+
+function normalizePalette(colors) {
+  const normalized = Array.isArray(colors)
+    ? colors.map(normalizeHexColor).filter(Boolean)
+    : []
+
+  return normalized.length ? normalized.slice(0, 7) : ['#E5E7EB']
+}
+
+function parseDiaryDate(item = {}) {
+  const createdAt = new Date(item.createdAt)
+  if (!Number.isNaN(createdAt.getTime())) return createdAt
+
+  if (typeof item.id === 'number' && item.id > 0) {
+    const idDate = new Date(item.id)
+    if (!Number.isNaN(idDate.getTime())) return idDate
+  }
+
+  if (typeof item.id === 'string' && /^\d{10,}$/.test(item.id)) {
+    const idDate = new Date(Number(item.id))
+    if (!Number.isNaN(idDate.getTime())) return idDate
+  }
+
+  if (typeof item.date === 'string') {
+    const match = item.date.match(/(\d{1,2})月(\d{1,2})日(?:.*?(\d{1,2}):(\d{2}))?/)
+    if (match) {
+      const fallbackDate = new Date()
+      fallbackDate.setMonth(Number(match[1]) - 1)
+      fallbackDate.setDate(Number(match[2]))
+      fallbackDate.setHours(Number(match[3] || 12), Number(match[4] || 0), 0, 0)
+      return fallbackDate
+    }
+  }
+
+  return new Date()
+}
+
+function formatDiaryDate(date) {
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(date)
+}
+
+function getLocalDateKey(date) {
+  const year = date.getFullYear()
+  const month = `${date.getMonth() + 1}`.padStart(2, '0')
+  const day = `${date.getDate()}`.padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function startOfDay(date) {
+  const nextDate = new Date(date)
+  nextDate.setHours(0, 0, 0, 0)
+  return nextDate
+}
+
+function getWeekStart(date) {
+  const weekStart = startOfDay(date)
+  const day = weekStart.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  weekStart.setDate(weekStart.getDate() + diff)
+  return weekStart
+}
+
+function isSameMonth(date, baseDate = new Date()) {
+  return date.getFullYear() === baseDate.getFullYear() && date.getMonth() === baseDate.getMonth()
+}
+
+function normalizeDiaryItem(item, index = 0) {
+  const source = item && typeof item === 'object' ? item : {}
+  const createdDate = parseDiaryDate(source)
+  const createdAt = createdDate.toISOString()
+  const normalizedPalette = normalizePalette(source.palette)
+  const dominantColorName = source.dominantColorName || getChineseColorName(normalizedPalette[0])
+  const style = getCopyStyle(source.styleId)
+
+  return {
+    id: source.id || `${createdDate.getTime()}-${index}`,
+    createdAt,
+    date: source.date || formatDiaryDate(createdDate),
+    image: typeof source.image === 'string' ? source.image : '',
+    thumbnail: typeof source.thumbnail === 'string' ? source.thumbnail : '',
+    palette: normalizedPalette,
+    dominantColorName,
+    playlistName: source.playlistName || '未命名情绪歌单',
+    bilingualCopy: source.bilingualCopy || '',
+    emojis: Array.isArray(source.emojis) ? source.emojis.filter(Boolean).slice(0, 6) : [],
+    styleId: style.id,
+    styleName: source.styleName || style.name,
+    templateType: source.templateType || 'classic',
+    isDark: Boolean(source.isDark)
+  }
+}
+
+function normalizeDiaryList(list) {
+  if (!Array.isArray(list)) return []
+
+  return list
+    .map((item, index) => normalizeDiaryItem(item, index))
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .slice(0, MAX_DIARY_ITEMS)
+}
+
+function getDominantMood(items) {
+  if (!items.length) {
+    return {
+      colorName: '待捕捉',
+      color: '#E9F1F6',
+      copy: '把今天的一束光存下来，手账会慢慢长出你的色谱。',
+      count: 0
+    }
+  }
+
+  const counts = new Map()
+  items.forEach(item => {
+    const colorName = item.dominantColorName || getChineseColorName(item.palette?.[0])
+    const color = item.palette?.[0] || '#E9F1F6'
+    const current = counts.get(colorName) || { colorName, color, count: 0 }
+    counts.set(colorName, { ...current, count: current.count + 1 })
+  })
+
+  const dominant = [...counts.values()].sort((a, b) => b.count - a.count)[0]
+  return {
+    ...dominant,
+    copy: getVibeCopy(dominant.colorName)
+  }
+}
+
+function calculateStreak(items) {
+  if (!items.length) return 0
+
+  const dateKeys = new Set(items.map(item => getLocalDateKey(new Date(item.createdAt))))
+  const newestDate = startOfDay(new Date(items[0].createdAt))
+  let cursor = newestDate
+  let streak = 0
+
+  while (dateKeys.has(getLocalDateKey(cursor))) {
+    streak += 1
+    cursor = new Date(cursor)
+    cursor.setDate(cursor.getDate() - 1)
+  }
+
+  return streak
+}
+
+const monthlyItems = computed(() => {
+  const now = new Date()
+  return diaryList.value.filter(item => isSameMonth(new Date(item.createdAt), now))
+})
+
+const weeklyItems = computed(() => {
+  const now = new Date()
+  const weekStart = getWeekStart(now)
+  return diaryList.value.filter(item => new Date(item.createdAt) >= weekStart)
+})
+
+const vibeReport = computed(() => {
+  const recentItem = diaryList.value[0]
+  if (!recentItem) return getDominantMood([])
+
+  return {
+    colorName: recentItem.dominantColorName || getChineseColorName(recentItem.palette?.[0]),
+    color: recentItem.palette?.[0] || '#E9F1F6',
+    copy: getVibeCopy(recentItem.dominantColorName || getChineseColorName(recentItem.palette?.[0])),
+    count: diaryList.value.length
+  }
+})
+
+const diarySummary = computed(() => ({
+  streak: calculateStreak(diaryList.value),
+  monthlyCount: monthlyItems.value.length,
+  monthLabel: new Intl.DateTimeFormat('zh-CN', { month: 'long' }).format(new Date())
+}))
+
+const calendarDays = computed(() => monthlyItems.value.map(item => ({
+  dateKey: getLocalDateKey(new Date(item.createdAt)),
+  color: item.palette?.[0] || '#E9F1F6'
+})).reverse())
+
+const weekReport = computed(() => {
+  if (!weeklyItems.value.length) {
+    return {
+      colorName: '待记录',
+      color: '#E9F1F6',
+      copy: diaryList.value.length
+        ? '本周还没留下颜色，最近一次心情会先替你占一个座。'
+        : '本周还在留白，等一道颜色落在这里。',
+      count: 0
+    }
+  }
+
+  return getDominantMood(weeklyItems.value)
+})
+
+async function openDiary() {
+  vibrate(10)
+  const storedList = await VibeStorage.get('vibe_diary') 
+  diaryList.value = normalizeDiaryList(storedList)
+  status.value = 'diary'
+}
+
+function createDiaryThumbnail(base64Image, maxWidth = 360) {
+  return new Promise(resolve => {
+    if (!base64Image) {
+      resolve('')
+      return
+    }
+
+    const img = new Image()
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      const scale = Math.min(1, maxWidth / img.width)
+      const width = Math.max(1, Math.round(img.width * scale))
+      const height = Math.max(1, Math.round(img.height * scale))
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      ctx.imageSmoothingEnabled = true
+      ctx.imageSmoothingQuality = 'low'
+      ctx.drawImage(img, 0, 0, width, height)
+      resolve(canvas.toDataURL('image/webp', 0.5))
+    }
+    img.onerror = () => resolve(base64Image)
+    img.src = base64Image
+  })
+}
+
+async function addToDiary() {
+  let currentList = normalizeDiaryList(await VibeStorage.get('vibe_diary'))
+  const createdDate = new Date()
+  const style = selectedCopyStyle.value
+
+  const newItem = {
+    id: createdDate.getTime(),
+    createdAt: createdDate.toISOString(),
+    date: formatDiaryDate(createdDate),
+    thumbnail: await createDiaryThumbnail(aiPayloadImage.value),
+    palette: [...palette.value],
+    dominantColorName: getChineseColorName(palette.value[0]),
+    playlistName: playlistName.value,
+    bilingualCopy: bilingualCopy.value,
+    emojis: [...emojis.value],
+    styleId: style.id,
+    styleName: style.name,
+    templateType: currentTemplate.value,
+    isDark: isDarkMode.value 
+  }
+  
+  currentList.unshift(newItem) 
+  currentList = normalizeDiaryList(currentList)
+  
+  let isSaved = false
+  while (!isSaved && currentList.length > 0) {
+    try {
+      await VibeStorage.set('vibe_diary', currentList)
+      diaryList.value = currentList
+      isSaved = true 
+    } catch (e) {
+      console.warn('存储空间超限，自动丢弃一条最旧的记录...')
+      currentList.pop() 
+    }
+  }
+
+  if (!isSaved) diaryList.value = [newItem]
+}
+
+const displayImageUrl = ref('') 
 const aiPayloadImage = ref('')
 const isSaving = ref(false)
-const isRegenerating = ref(false)
-const themeOverride = ref(null)
-const currentScanTextIndex = ref(0)
-const sourceType = ref('gallery')
-const currentDiaryEntryId = ref(null)
-const copyStatus = ref('')
-const shareSettings = ref({ ratio: 'feed', showWatermark: false })
+const isRegenerating = ref(false) 
 
 const palette = ref(['#E5E7EB', '#D1D5DB', '#9CA3AF', '#6B7280', '#4B5563'])
 const playlistName = ref('正在感知氛围...')
@@ -45,49 +368,12 @@ const bilingualCopy = ref('解析光影频率 / Decoding light frequencies.')
 const emojis = ref(['✨', '⏳', '🌫️'])
 
 const scanTexts = ['正在提取光影...', '感受色彩温度...', '生成情绪波形...']
+const currentScanTextIndex = ref(0)
 let scanInterval = null
-let copyStatusTimer = null
-
-function padNumber(value) {
-  return String(value).padStart(2, '0')
-}
-
-function toDate(value) {
-  const date = value ? new Date(value) : new Date()
-  return Number.isNaN(date.getTime()) ? new Date() : date
-}
-
-function getDayKey(value = new Date()) {
-  const date = toDate(value)
-  return `${date.getFullYear()}-${padNumber(date.getMonth() + 1)}-${padNumber(date.getDate())}`
-}
-
-function addDays(value, amount) {
-  const date = toDate(value)
-  date.setDate(date.getDate() + amount)
-  return date
-}
-
-function getDateTimeLabel(value = new Date()) {
-  return toDate(value).toLocaleString('zh-CN', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
-}
-
-function getDateLabel(value = new Date()) {
-  return toDate(value).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
-}
-
-function getMonthLabel(value = new Date()) {
-  return toDate(value).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long' })
-}
 
 function vibrate(pattern = 15) {
   if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-    try { navigator.vibrate(pattern) } catch (e) {}
+    try { navigator.vibrate(pattern) } catch(e) {}
   }
 }
 
@@ -98,187 +384,7 @@ function getLuminance(hex) {
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255
 }
 
-function getReadableTextColor(hex) {
-  return getLuminance(hex) < 0.52 ? '#F9FAFB' : '#111827'
-}
-
-function normalizeDiaryItem(item = {}) {
-  const createdAt = item.createdAt || new Date(Number(item.id) || Date.now()).toISOString()
-  const colors = Array.isArray(item.palette) && item.palette.length ? item.palette : ['#E5E7EB']
-  const dominantColor = item.dominantColor || colors[0]
-
-  return {
-    version: 2,
-    id: item.id || Date.now(),
-    createdAt,
-    dayKey: item.dayKey || getDayKey(createdAt),
-    date: item.date || getDateTimeLabel(createdAt),
-    image: item.image || '',
-    thumbnail: item.thumbnail || item.image || '',
-    palette: colors,
-    dominantColor,
-    dominantColorName: item.dominantColorName || getChineseColorName(dominantColor),
-    playlistName: item.playlistName || '未知的情绪波段',
-    bilingualCopy: item.bilingualCopy || '无法解析的氛围 / Unresolved vibe.',
-    emojis: Array.isArray(item.emojis) ? item.emojis : ['✨', '🤍', '🌫️'],
-    templateType: item.templateType || 'classic',
-    aspectRatio: item.aspectRatio || 'feed',
-    showWatermark: Boolean(item.showWatermark),
-    shareCount: item.shareCount || 0,
-    isDark: Boolean(item.isDark),
-    source: item.source || 'gallery'
-  }
-}
-
-async function loadDiary() {
-  const storedList = await VibeStorage.get(DIARY_KEY)
-  diaryList.value = Array.isArray(storedList)
-    ? storedList.map(normalizeDiaryItem).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    : []
-}
-
-async function loadShareSettings() {
-  const storedSettings = await VibeStorage.get(SHARE_SETTINGS_KEY)
-  const hasValidRatio = SHARE_PRESETS.some(preset => preset.key === storedSettings?.ratio)
-
-  shareSettings.value = {
-    ratio: hasValidRatio ? storedSettings.ratio : 'feed',
-    showWatermark: Boolean(storedSettings?.showWatermark)
-  }
-}
-
-async function persistShareSettings() {
-  try {
-    await VibeStorage.set(SHARE_SETTINGS_KEY, shareSettings.value)
-  } catch (e) {}
-}
-
-const selectedSharePreset = computed(() => {
-  return SHARE_PRESETS.find(preset => preset.key === shareSettings.value.ratio) || SHARE_PRESETS[0]
-})
-
-const todayKey = computed(() => getDayKey())
-
-const todayEntry = computed(() => {
-  return diaryList.value.find(item => item.dayKey === todayKey.value) || null
-})
-
-const vibeReport = computed(() => {
-  if (diaryList.value.length === 0) return null
-
-  const colorCounts = {}
-  diaryList.value.forEach(item => {
-    item.palette.forEach(hex => {
-      const name = getChineseColorName(hex)
-      colorCounts[name] = (colorCounts[name] || 0) + 1
-    })
-  })
-
-  let dominantColor = ''
-  let maxCount = 0
-  for (const [name, count] of Object.entries(colorCounts)) {
-    if (count > maxCount) {
-      maxCount = count
-      dominantColor = name
-    }
-  }
-
-  return {
-    colorName: dominantColor,
-    copy: getVibeCopy(dominantColor),
-    count: diaryList.value.length
-  }
-})
-
-const diarySummary = computed(() => {
-  const dayKeys = new Set(diaryList.value.map(item => item.dayKey))
-  const now = new Date()
-  let cursor = new Date(now)
-
-  if (!dayKeys.has(getDayKey(cursor))) {
-    cursor = addDays(cursor, -1)
-  }
-
-  let streak = 0
-  while (dayKeys.has(getDayKey(cursor))) {
-    streak += 1
-    cursor = addDays(cursor, -1)
-  }
-
-  const monthPrefix = todayKey.value.slice(0, 7)
-  const monthlyCount = diaryList.value.filter(item => item.dayKey?.startsWith(monthPrefix)).length
-
-  return {
-    streak,
-    monthlyCount,
-    totalCount: diaryList.value.length,
-    monthLabel: getMonthLabel(now)
-  }
-})
-
-const calendarDays = computed(() => {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = now.getMonth()
-  const daysInMonth = new Date(year, month + 1, 0).getDate()
-  const recordByDay = new Map()
-
-  diaryList.value.forEach(item => {
-    if (!recordByDay.has(item.dayKey)) {
-      recordByDay.set(item.dayKey, item)
-    }
-  })
-
-  return Array.from({ length: daysInMonth }, (_, index) => {
-    const day = index + 1
-    const key = `${year}-${padNumber(month + 1)}-${padNumber(day)}`
-    const item = recordByDay.get(key)
-    const color = item?.dominantColor || item?.palette?.[0] || ''
-
-    return {
-      day,
-      key,
-      color,
-      textColor: color ? getReadableTextColor(color) : undefined,
-      isToday: key === todayKey.value
-    }
-  })
-})
-
-const weekReport = computed(() => {
-  const start = addDays(new Date(), -6)
-  start.setHours(0, 0, 0, 0)
-  const records = diaryList.value.filter(item => new Date(item.createdAt) >= start)
-
-  if (records.length < 3) return null
-
-  const colorCounts = {}
-  const paletteSet = []
-
-  records.forEach(item => {
-    const colorName = item.dominantColorName || getChineseColorName(item.dominantColor || item.palette?.[0])
-    colorCounts[colorName] = (colorCounts[colorName] || 0) + 1
-    item.palette.forEach(color => {
-      if (!paletteSet.includes(color) && paletteSet.length < 7) paletteSet.push(color)
-    })
-  })
-
-  let colorName = ''
-  let maxCount = 0
-  for (const [name, count] of Object.entries(colorCounts)) {
-    if (count > maxCount) {
-      colorName = name
-      maxCount = count
-    }
-  }
-
-  return {
-    colorName,
-    palette: paletteSet.length ? paletteSet : ['#E5E7EB'],
-    copy: getVibeCopy(colorName),
-    count: records.length
-  }
-})
+const themeOverride = ref(null) 
 
 const isDarkMode = computed(() => {
   if (themeOverride.value !== null) return themeOverride.value === 'dark'
@@ -288,56 +394,20 @@ const isDarkMode = computed(() => {
   return avgLum < 0.5
 })
 
-const isCardReadonly = computed(() => isSaving.value || status.value === 'preview')
-
 function toggleTheme() {
   vibrate(10)
   document.activeElement?.blur()
   themeOverride.value = isDarkMode.value ? 'light' : 'dark'
 }
 
-function setShareRatio(ratio) {
-  vibrate(10)
-  shareSettings.value = { ...shareSettings.value, ratio }
-  persistShareSettings()
-}
-
-function toggleWatermark() {
-  vibrate(10)
-  shareSettings.value = {
-    ...shareSettings.value,
-    showWatermark: !shareSettings.value.showWatermark
-  }
-  persistShareSettings()
-}
-
-function createShareText() {
-  const colorName = getChineseColorName(palette.value[0])
-  return `${playlistName.value}\n${bilingualCopy.value}\n今日氛围色：${colorName}`
-}
-
-async function copyShareText() {
-  try {
-    await navigator.clipboard.writeText(createShareText())
-    copyStatus.value = '已复制'
-  } catch (e) {
-    copyStatus.value = '复制失败'
-  } finally {
-    if (copyStatusTimer) clearTimeout(copyStatusTimer)
-    copyStatusTimer = window.setTimeout(() => {
-      copyStatus.value = ''
-    }, 1600)
-  }
-}
-
-function compressImage(file, maxWidth = 520) {
+function compressImage(file, maxWidth = 600) {
   return new Promise((resolve, reject) => {
     const img = new Image()
-    const objectUrl = URL.createObjectURL(file)
+    const objectUrl = URL.createObjectURL(file) 
     img.src = objectUrl
 
     img.onload = () => {
-      URL.revokeObjectURL(objectUrl)
+      URL.revokeObjectURL(objectUrl) 
       const canvas = document.createElement('canvas')
       let width = img.width
       let height = img.height
@@ -349,101 +419,82 @@ function compressImage(file, maxWidth = 520) {
       canvas.height = height
       const ctx = canvas.getContext('2d')
       ctx.imageSmoothingEnabled = true
-      ctx.imageSmoothingQuality = 'low'
+      ctx.imageSmoothingQuality = 'low' 
       ctx.drawImage(img, 0, 0, width, height)
-      resolve(canvas.toDataURL('image/webp', 0.55))
+      resolve(canvas.toDataURL('image/webp', 0.6))
     }
     img.onerror = e => reject(e)
   })
 }
 
-async function fetchVibeFromAI(base64Image, hexColors) {
-  const prompt = `你是一个拥有极高审美的情绪感知专家。请分析这张图片，并结合我刚刚提取出的图片主色调（${hexColors.join(', ')}），为其生成具有杂志感和氛围感的文案。请以整张图片的主体、场景、光影和情绪为主，色彩只作为辅助参考。请严格按照以下 JSON 格式返回，不要输出 markdown 标记：
+function buildVibePrompt(hexColors, style) {
+  return `你是一个拥有极高审美的情绪感知专家。请分析这张图片，并结合我刚刚提取出的图片主色调（${hexColors.join(', ')}），为其生成一组适合保存和分享的氛围文案。
+
+本次文案风格：${style.promptName}
+- playlistName 命名方向：${style.playlistGuide}
+- bilingualCopy 语气：${style.copyGuide}
+- emojis 选择：${style.emojiGuide}
+
+硬性要求：
+- 严格返回 JSON，不要 markdown，不要解释。
+- 中文文案要短，适合发朋友圈或小红书。
+- 英文文案要自然，不要机器翻译腔。
+- emojis 只返回 2-4 个。
+
+请严格按照以下 JSON 格式返回：
 {
-  "playlistName": "一个带有诗意和情绪的独立音乐歌单名，例如：适合在雨天发呆的 Lo-Fi",
-  "bilingualCopy": "一句极其克制、高级的中英双语朋友圈文案，例如：在城市的缝隙里呼吸 / Breathing in the cracks of the city.",
+  "playlistName": "一个符合本次风格的短歌单名",
+  "bilingualCopy": "一句中文短句 / A natural English line.",
   "emojis": ["🌧️", "☕", "🎧"]
 }`
+}
 
-  const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), 90000)
-  const startedAt = performance.now()
+async function fetchVibeFromAI(base64Image, hexColors, style = selectedCopyStyle.value) {
+  const prompt = buildVibePrompt(hexColors, style)
 
   try {
     const response = await fetch('/api/vibe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'qwen3.7-plus',
-        response_format: { type: 'json_object' },
-        max_tokens: 300,
+        model: "qwen3.7-plus",//大模型
+        response_format: { type: "json_object" }, 
         messages: [{
-          role: 'user',
+          role: "user",
           content: [
-            { type: 'text', text: prompt },
-            { type: 'image_url', image_url: { url: base64Image } }
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: base64Image } }
           ]
         }]
-      }),
-      signal: controller.signal
-    })
-
-    const data = await response.json()
-    const elapsedMs = Math.round(performance.now() - startedAt)
-
-    if (!response.ok) {
-      console.error('AI 上游返回错误:', {
-        status: response.status,
-        elapsedMs,
-        code: data?.error?.code,
-        message: data?.error?.message
       })
-      return null
-    }
-
+    })
+    
+    if (!response.ok) throw new Error(`后端接口报错: HTTP ${response.status}`)
+    const data = await response.json()
     if (data.choices && data.choices[0]) {
       let rawContent = data.choices[0].message.content
+      // 🚀 核心修复：用正则强行剥离大模型可能吐出的 markdown 代码块标记
       rawContent = rawContent.replace(/```json/gi, '').replace(/```/g, '').trim()
-      console.info('AI 图片解析完成:', { elapsedMs })
       return JSON.parse(rawContent)
     }
-    console.error('AI 返回缺少 choices:', { elapsedMs, data })
   } catch (e) {
-    const elapsedMs = Math.round(performance.now() - startedAt)
-    console.error('AI 接口调用崩溃:', {
-      elapsedMs,
-      name: e.name,
-      message: e.name === 'AbortError' ? 'AI 解析超过 90 秒，已自动停止' : e.message
-    })
-  } finally {
-    window.clearTimeout(timeout)
+    console.error("AI 接口调用崩溃:", e)
+    return null
   }
-
-  return null
 }
 
-function openCamera() {
-  sourceType.value = 'camera'
-  vibrate(20)
-  cameraInput.value?.click()
-}
-
-function openGallery() {
-  sourceType.value = 'gallery'
-  vibrate(20)
-  galleryInput.value?.click()
-}
+function openCamera() { vibrate(20); cameraInput.value?.click() }
+function openGallery() { vibrate(20); galleryInput.value?.click() }
 
 async function handleUpload(event) {
   const file = event.target.files?.[0]
   if (!file) return
 
-  currentDiaryEntryId.value = null
-  themeOverride.value = null
-  vibrate([15, 30, 15])
+  themeOverride.value = null 
+  vibrate([15, 30, 15]) 
   status.value = 'scanning'
   currentScanTextIndex.value = 0
-
+  
   try {
     if (displayImageUrl.value) {
       URL.revokeObjectURL(displayImageUrl.value)
@@ -451,13 +502,11 @@ async function handleUpload(event) {
     displayImageUrl.value = URL.createObjectURL(file)
     await new Promise(resolve => setTimeout(resolve, 50))
     aiPayloadImage.value = await compressImage(file)
-  } catch (e) {
+  } catch(e) {
     alert('读取图片失败！')
-    status.value = 'idle'
     return
   }
 
-  if (scanInterval) clearInterval(scanInterval)
   scanInterval = window.setInterval(() => {
     currentScanTextIndex.value = (currentScanTextIndex.value + 1) % scanTexts.length
   }, 800)
@@ -467,59 +516,56 @@ async function handleUpload(event) {
   const dataPipeline = (async () => {
     let extractedHex = []
     try {
+      //压缩后的图
       const colors = await extractColors(aiPayloadImage.value)
       extractedHex = colors.slice(0, 5).map(c => c.hex.toUpperCase())
       while (extractedHex.length < 5 && extractedHex.length > 0) {
         extractedHex.push(extractedHex[extractedHex.length - 1])
       }
       if (extractedHex.length > 0) palette.value = extractedHex
-    } catch (e) {}
-
-    return await fetchVibeFromAI(aiPayloadImage.value, extractedHex)
+    } catch(e) {}
+    
+    return await fetchVibeFromAI(aiPayloadImage.value, extractedHex, selectedCopyStyle.value)
   })()
 
   try {
-    const [, aiResult] = await Promise.all([waitAnimation, dataPipeline])
+    const [_, aiResult] = await Promise.all([waitAnimation, dataPipeline])
     if (aiResult) {
       playlistName.value = aiResult.playlistName || '未知的情绪波段'
       bilingualCopy.value = aiResult.bilingualCopy || '无法解析的氛围 / Unresolved vibe.'
       emojis.value = aiResult.emojis || ['✨', '🤍', '🌫️']
-      vibrate([20, 50])
-    } else {
-      playlistName.value = '未知的情绪波段'
-      bilingualCopy.value = '无法解析的氛围 / Unresolved vibe.'
-      emojis.value = ['✨', '🤍', '🌫️']
+      vibrate([20, 50]) 
     }
   } catch (e) {
   } finally {
     clearInterval(scanInterval)
-    scanInterval = null
     status.value = 'result'
   }
 }
 
 async function regenerateVibe() {
-  if (isRegenerating.value || !aiPayloadImage.value) return
+  if (isRegenerating.value || !aiPayloadImage.value) return 
   vibrate(15)
   isRegenerating.value = true
-
+  
   try {
-    const aiResult = await fetchVibeFromAI(aiPayloadImage.value, palette.value)
-    if (!aiResult) {
-      return
+    const aiResult = await fetchVibeFromAI(aiPayloadImage.value, palette.value, selectedCopyStyle.value) 
+    if (aiResult) {
+      playlistName.value = aiResult.playlistName || playlistName.value
+      bilingualCopy.value = aiResult.bilingualCopy || bilingualCopy.value
+      emojis.value = aiResult.emojis || emojis.value
+      vibrate([15, 30]) 
     }
-    playlistName.value = aiResult.playlistName || playlistName.value
-    bilingualCopy.value = aiResult.bilingualCopy || bilingualCopy.value
-    emojis.value = aiResult.emojis || emojis.value
-    vibrate([15, 30])
   } finally {
     isRegenerating.value = false
   }
 }
 
+const isCardReadonly = computed(() => isSaving.value || status.value === 'preview')
+
 function goToPreview() {
   vibrate(10)
-  document.activeElement?.blur()
+  document.activeElement?.blur() 
   status.value = 'preview'
 }
 
@@ -528,99 +574,42 @@ function goBackToEdit() {
   status.value = 'result'
 }
 
-async function saveDiaryItem() {
-  let currentList = await VibeStorage.get(DIARY_KEY) || []
-  currentList = Array.isArray(currentList) ? currentList.map(normalizeDiaryItem) : []
-
-  const now = new Date()
-  const currentId = currentDiaryEntryId.value || Date.now()
-  const existingIndex = currentList.findIndex(item => item.id === currentId)
-  const previousItem = existingIndex >= 0 ? currentList[existingIndex] : null
-
-  const item = normalizeDiaryItem({
-    ...previousItem,
-    id: currentId,
-    createdAt: previousItem?.createdAt || now.toISOString(),
-    dayKey: previousItem?.dayKey || getDayKey(now),
-    date: previousItem?.date || getDateTimeLabel(now),
-    image: aiPayloadImage.value,
-    thumbnail: aiPayloadImage.value,
-    palette: [...palette.value],
-    dominantColor: palette.value[0],
-    dominantColorName: getChineseColorName(palette.value[0]),
-    playlistName: playlistName.value,
-    bilingualCopy: bilingualCopy.value,
-    emojis: [...emojis.value],
-    templateType: currentTemplate.value,
-    aspectRatio: shareSettings.value.ratio,
-    showWatermark: shareSettings.value.showWatermark,
-    shareCount: (previousItem?.shareCount || 0) + 1,
-    isDark: isDarkMode.value,
-    source: sourceType.value
-  })
-
-  if (existingIndex >= 0) {
-    currentList.splice(existingIndex, 1, item)
-  } else {
-    currentList.unshift(item)
-  }
-
-  currentList.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-  if (currentList.length > MAX_DIARY_ITEMS) currentList = currentList.slice(0, MAX_DIARY_ITEMS)
-
-  let isSaved = false
-  while (!isSaved && currentList.length > 0) {
-    try {
-      await VibeStorage.set(DIARY_KEY, currentList)
-      diaryList.value = currentList
-      currentDiaryEntryId.value = item.id
-      isSaved = true
-    } catch (e) {
-      console.warn('存储空间超限，自动丢弃一条最旧的记录...')
-      currentList.pop()
-    }
-  }
-}
-
 async function saveCard() {
-  if (!sharePosterRef.value?.posterElement || isSaving.value) return
+  // 💡 3. 核心变化：截图时，向子组件内部请求真实的 DOM 节点
+  if (!vibeCardRef.value || isSaving.value) return
   vibrate(15)
   isSaving.value = true
   document.activeElement?.blur()
-
+  
   try {
     await new Promise(resolve => setTimeout(resolve, 300))
-    const targetDOM = sharePosterRef.value.posterElement
-    const blob = await toBlob(targetDOM, {
-      pixelRatio: 3,
-      backgroundColor: isDarkMode.value || currentTemplate.value === 'magazine' ? '#111827' : '#F9FAFB',
-      style: { transform: 'scale(1)' }
-    })
+    
+    const targetDOM = vibeCardRef.value.cardElement // 获取子组件暴露的 DOM
 
+    const captureOptions = {
+      pixelRatio: 3, 
+      backgroundColor: isDarkMode.value && currentTemplate.value === 'classic' ? '#111827' : '#F9FAFB', // 智能切换背景色
+      style: { transform: 'scale(1)' }
+    }
+
+    try { await toBlob(targetDOM, captureOptions) } catch (e) {}
+
+    const blob = await toBlob(targetDOM, captureOptions)
     if (!blob) throw new Error('DOM 渲染 Blob 失败')
 
-    await saveDiaryItem()
-    vibrate([30, 50])
-
-    const fileName = `VibeCard_${selectedSharePreset.value.key}_${Date.now()}.png`
+    vibrate([30, 50]) 
+    await addToDiary() 
+    const fileName = `VibeCard_${Date.now()}.png`
     const file = new File([blob], fileName, { type: 'image/png' })
 
     if (navigator.canShare && navigator.canShare({ files: [file] })) {
       try {
-        await navigator.share({
-          title: '氛围感取色器',
-          text: createShareText(),
-          files: [file]
-        })
-      } catch (e) {
-        if (e.name !== 'AbortError') throw e
-      }
+        await navigator.share({ title: '氛围感取色器', text: `万物皆有氛围 | ${playlistName.value}`, files: [file] })
+      } catch (e) { if (e.name !== 'AbortError') throw e }
     } else {
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
-      link.download = fileName
-      link.href = url
-      link.click()
+      link.download = fileName; link.href = url; link.click()
       setTimeout(() => URL.revokeObjectURL(url), 2000)
     }
   } catch (err) {
@@ -630,83 +619,93 @@ async function saveCard() {
   }
 }
 
-async function openDiary() {
-  vibrate(10)
-  await loadDiary()
-  status.value = 'diary'
-}
-
 function reset() {
   vibrate(10)
-  themeOverride.value = null
+  themeOverride.value = null 
   status.value = 'idle'
-  currentDiaryEntryId.value = null
-
+  
   if (displayImageUrl.value) {
     URL.revokeObjectURL(displayImageUrl.value)
     displayImageUrl.value = ''
   }
   aiPayloadImage.value = ''
-
+  
   if (cameraInput.value) cameraInput.value.value = ''
   if (galleryInput.value) galleryInput.value.value = ''
 }
 
-onMounted(() => {
-  loadDiary()
-  loadShareSettings()
-})
-
-onBeforeUnmount(() => {
-  if (scanInterval) clearInterval(scanInterval)
-  if (copyStatusTimer) clearTimeout(copyStatusTimer)
-})
+onBeforeUnmount(() => { if (scanInterval) clearInterval(scanInterval) })
 </script>
 
 <template>
-  <div class="fixed inset-0 -z-10 overflow-hidden bg-[#F9FAFB] transition-colors duration-1000">
-    <div v-if="status === 'idle'" class="pointer-events-none absolute inset-0 opacity-60 transition-opacity duration-1000">
-      <div class="absolute top-[-10%] left-[-10%] h-[30rem] w-[30rem] animate-blob rounded-full bg-cyan-200/40 mix-blend-multiply blur-[100px]"></div>
-      <div class="absolute top-[20%] right-[-10%] h-[25rem] w-[25rem] animate-blob rounded-full bg-pink-200/40 mix-blend-multiply blur-[100px]" style="animation-delay: 2s;"></div>
-      <div class="absolute bottom-[-10%] left-[20%] h-[35rem] w-[35rem] animate-blob rounded-full bg-purple-200/30 mix-blend-multiply blur-[100px]" style="animation-delay: 4s;"></div>
+  <div class="fixed inset-0 -z-10 bg-[#F9FAFB] transition-colors duration-1000 overflow-hidden">
+    <div v-if="status === 'idle'" class="absolute inset-0 pointer-events-none opacity-60 transition-opacity duration-1000">
+      <div class="absolute top-[-10%] left-[-10%] w-[30rem] h-[30rem] bg-cyan-200/40 rounded-full mix-blend-multiply filter blur-[100px] animate-blob"></div>
+      <div class="absolute top-[20%] right-[-10%] w-[25rem] h-[25rem] bg-pink-200/40 rounded-full mix-blend-multiply filter blur-[100px] animate-blob" style="animation-delay: 2s;"></div>
+      <div class="absolute bottom-[-10%] left-[20%] w-[35rem] h-[35rem] bg-purple-200/30 rounded-full mix-blend-multiply filter blur-[100px] animate-blob" style="animation-delay: 4s;"></div>
     </div>
 
-    <div v-if="status !== 'idle' && displayImageUrl" class="absolute inset-0 opacity-100 transition-opacity duration-1000">
-      <img :src="displayImageUrl" class="absolute inset-0 h-full w-full scale-110 object-cover opacity-30" alt="bg-blur" />
-      <div class="absolute inset-0 bg-white/50 backdrop-blur-3xl" :class="isDarkMode ? 'bg-black/70' : 'bg-white/50'"></div>
+    <div v-if="status !== 'idle' && displayImageUrl" class="absolute inset-0 transition-opacity duration-1000 opacity-100">
+      <img :src="displayImageUrl" class="absolute inset-0 w-full h-full object-cover scale-110 opacity-30" alt="bg-blur" />
+      <div class="absolute inset-0 backdrop-blur-3xl bg-white/50" :class="isDarkMode ? 'bg-black/70' : 'bg-white/50'"></div>
     </div>
   </div>
 
-  <main class="relative z-10 flex min-h-[100dvh] flex-col items-center overflow-x-hidden px-6 py-10" :class="isDarkMode ? 'text-gray-100' : 'text-gray-800'">
+  <main class="min-h-[100dvh] overflow-hidden px-6 py-10 relative z-10 flex flex-col" :class="isDarkMode ? 'text-gray-100' : 'text-gray-800'">
     <input ref="cameraInput" class="sr-only" type="file" accept="image/*" capture="environment" @change="handleUpload" />
     <input ref="galleryInput" class="sr-only" type="file" accept="image/*" @change="handleUpload" />
 
-    <section class="flex w-full max-w-sm flex-1 flex-col items-center justify-center">
-      <div v-if="status === 'idle'" class="relative z-10 flex w-full flex-col items-center text-center animate-fade-in">
-        <div class="mb-8 flex flex-col items-center">
-          <p class="mb-3 font-mono text-[0.6rem] uppercase tracking-[0.4em] text-gray-400/70">Capture The Vibe</p>
-          <h1 class="mb-4 font-serif text-[2.75rem] leading-none tracking-wide text-gray-900">氛围感取色器</h1>
-          <p class="text-[0.75rem] font-light tracking-[0.2em] text-gray-400">万物皆有氛围</p>
+    <section class="mx-auto flex flex-1 w-full max-w-sm flex-col items-center justify-center">
+      
+      <div v-if="status === 'idle'" class="flex w-full flex-col items-center text-center animate-fade-in relative z-10">
+        <div class="mb-12 flex flex-col items-center">
+          <p class="mb-3 text-[0.6rem] tracking-[0.4em] text-gray-400/70 font-mono uppercase">Capture The Vibe</p>
+          <h1 class="font-serif text-[2.75rem] tracking-wide text-gray-900 leading-none mb-4">氛围感取色器</h1>
+          <p class="text-[0.75rem] font-light text-gray-400 tracking-[0.2em]">万物皆有氛围</p>
         </div>
 
-        <DailySummary
-          :todayEntry="todayEntry"
-          :streak="diarySummary.streak"
-          :monthlyCount="diarySummary.monthlyCount"
-          :vibeReport="vibeReport"
-          @capture="openCamera"
-          @gallery="openGallery"
-          @diary="openDiary"
-        />
-      </div>
+        <div class="mb-2 w-full max-w-[19rem]">
+          <p class="mb-2 text-[0.55rem] uppercase tracking-[0.24em] text-gray-400/80">文案风格</p>
+          <div class="flex flex-wrap justify-center gap-1.5">
+            <button
+              v-for="style in COPY_STYLES"
+              :key="style.id"
+              type="button"
+              class="rounded-full border px-3 py-1 text-[0.62rem] tracking-[0.08em] transition-all active:scale-95"
+              :class="selectedStyleId === style.id ? 'border-gray-900/10 bg-gray-900/85 text-white shadow-sm' : 'border-white/70 bg-white/35 text-gray-500 backdrop-blur-xl hover:bg-white/60 hover:text-gray-800'"
+              @click="selectCopyStyle(style.id)"
+            >
+              {{ style.name }}
+            </button>
+          </div>
+        </div>
 
+        <div class="animate-float mt-8 flex gap-5 w-full justify-center">
+          <button @click="openCamera" class="group relative flex h-36 w-32 flex-col items-center justify-center rounded-[2rem] border-[0.5px] border-white/80 bg-white/30 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.04)] transition-all duration-500 hover:scale-105 hover:bg-white/50 hover:shadow-[0_16px_48px_rgba(0,0,0,0.08)] active:scale-95">
+            <span class="text-3xl mb-3 transition-transform group-hover:scale-110">📷</span>
+            <span class="text-[0.65rem] tracking-[0.15em] text-gray-500 group-hover:text-gray-800">捕捉此刻</span>
+          </button>
+
+          <button @click="openGallery" class="group relative flex h-36 w-32 flex-col items-center justify-center rounded-[2rem] border-[0.5px] border-white/80 bg-white/30 backdrop-blur-2xl shadow-[0_8px_32px_rgba(0,0,0,0.04)] transition-all duration-500 hover:scale-105 hover:bg-white/50 hover:shadow-[0_16px_48px_rgba(0,0,0,0.08)] active:scale-95">
+            <span class="text-3xl mb-3 transition-transform group-hover:scale-110">🖼️</span>
+            <span class="text-[0.65rem] tracking-[0.15em] text-gray-500 group-hover:text-gray-800">读取相册</span>
+          </button>
+        </div>
+        <div class="mt-12 flex justify-center w-full animate-fade-in" style="animation-delay: 0.3s;">
+          <button @click="openDiary" class="flex items-center gap-2 text-[0.7rem] tracking-[0.2em] text-gray-400 hover:text-gray-700 transition-colors uppercase">
+            <svg class="w-4 h-4 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" /></svg>
+            我的情绪手账
+          </button>
+        </div>
+      </div>
+      
       <div v-else-if="status === 'scanning'" class="flex w-full flex-col items-center gap-10">
-        <div class="relative h-[22rem] w-64 overflow-hidden rounded-[2rem] border border-white/60 shadow-[0_20px_50px_rgba(0,0,0,0.15)]">
-          <img :src="displayImageUrl" class="h-full w-full object-cover" alt="" />
+        <div class="relative w-64 h-[22rem] overflow-hidden rounded-[2rem] shadow-[0_20px_50px_rgba(0,0,0,0.15)] border border-white/60">
+          <img :src="displayImageUrl" class="h-full w-full object-cover" />
           <div class="absolute inset-0 bg-black/10"></div>
           <div class="scan-line absolute left-0 right-0 top-0 h-32"></div>
         </div>
-        <div class="flex h-8 items-center justify-center">
+        <div class="h-8 flex items-center justify-center">
           <transition name="fade" mode="out-in">
             <p :key="currentScanTextIndex" class="font-serif text-lg tracking-widest text-gray-800/80" :class="isDarkMode ? 'text-gray-200' : 'text-gray-800'">
               {{ scanTexts[currentScanTextIndex] }}
@@ -715,8 +714,10 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <div v-else-if="status === 'result'" class="flex w-full flex-col items-center animate-fade-in">
+      <div v-else-if="status === 'result' || status === 'preview'" class="flex w-full flex-col items-center animate-fade-in">
+        
         <VibeCard
+          ref="vibeCardRef"
           :templateType="currentTemplate"
           :image="displayImageUrl"
           v-model:palette="palette"
@@ -731,73 +732,67 @@ onBeforeUnmount(() => {
           @regenerate="regenerateVibe"
         />
 
-        <div class="mt-6 flex gap-2 rounded-full p-1.5 transition-colors" :class="isDarkMode ? 'bg-white/10' : 'bg-black/5'">
-          <button @click="currentTemplate = 'classic'; vibrate(10)" class="rounded-full px-5 py-1.5 text-xs font-medium transition-all" :class="currentTemplate === 'classic' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">经典</button>
-          <button @click="currentTemplate = 'polaroid'; vibrate(10)" class="rounded-full px-5 py-1.5 text-xs font-medium transition-all" :class="currentTemplate === 'polaroid' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">拍立得</button>
-          <button @click="currentTemplate = 'magazine'; vibrate(10)" class="rounded-full px-5 py-1.5 text-xs font-medium transition-all" :class="currentTemplate === 'magazine' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">杂志</button>
+        <div v-if="!isCardReadonly" class="mt-4 flex w-full flex-wrap justify-center gap-1.5 px-2">
+          <button
+            v-for="style in COPY_STYLES"
+            :key="`result-style-${style.id}`"
+            type="button"
+            class="rounded-full border px-3 py-1 text-[0.6rem] tracking-[0.08em] transition-all active:scale-95"
+            :class="selectedStyleId === style.id
+              ? (isDarkMode ? 'border-white/20 bg-white/90 text-gray-900 shadow-sm' : 'border-gray-900/10 bg-gray-900/85 text-white shadow-sm')
+              : (isDarkMode ? 'border-white/10 bg-white/10 text-gray-400 hover:bg-white/15 hover:text-gray-200' : 'border-white/70 bg-white/35 text-gray-500 backdrop-blur-xl hover:bg-white/60 hover:text-gray-800')"
+            @click="selectCopyStyle(style.id)"
+          >
+            {{ style.name }}
+          </button>
         </div>
 
-        <p class="mt-4 animate-pulse text-center text-[0.55rem] tracking-[0.1em]" :class="isDarkMode ? 'text-gray-500' : 'text-gray-400'">
+        <div v-if="!isCardReadonly" class="mt-6 flex gap-2 p-1.5 rounded-full transition-colors" :class="isDarkMode ? 'bg-white/10' : 'bg-black/5'">
+          <button @click="currentTemplate = 'classic'; vibrate(10)" class="px-5 py-1.5 rounded-full text-xs font-medium transition-all" :class="currentTemplate === 'classic' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">经典</button>
+          <button @click="currentTemplate = 'polaroid'; vibrate(10)" class="px-5 py-1.5 rounded-full text-xs font-medium transition-all" :class="currentTemplate === 'polaroid' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">拍立得</button>
+          <button @click="currentTemplate = 'magazine'; vibrate(10)" class="px-5 py-1.5 rounded-full text-xs font-medium transition-all" :class="currentTemplate === 'magazine' ? (isDarkMode ? 'bg-gray-100 text-gray-900 shadow-sm' : 'bg-white text-gray-900 shadow-sm') : 'text-gray-500 hover:text-gray-700'">杂志</button>
+        </div>
+
+        <p v-if="status === 'result'" class="mt-4 text-[0.55rem] tracking-[0.1em] text-center animate-pulse" :class="isDarkMode ? 'text-gray-500' : 'text-gray-400'">
           ✨ 点击文案/色块修改，左上角切换明暗
         </p>
+        <p v-else class="mt-5 text-[0.55rem] tracking-[0.1em] text-center" :class="isDarkMode ? 'text-gray-500' : 'text-gray-400'">
+          👁️ 预览模式：保存后的卡片效果如上所示
+        </p>
 
-        <div class="mt-4 flex w-full gap-4 px-2">
+        <div v-if="status === 'result'" class="mt-4 flex w-full gap-4 px-2">
           <button
             type="button"
-            class="h-14 flex-1 rounded-full border text-sm tracking-widest shadow-md transition-all active:scale-95"
-            :class="isDarkMode ? 'border-transparent bg-gray-100 text-gray-900 hover:bg-white' : 'border-transparent bg-gray-900 text-white hover:bg-gray-800'"
+            class="h-14 flex-1 rounded-full text-sm tracking-widest shadow-md transition-all active:scale-95 border"
+            :class="isDarkMode ? 'bg-gray-100 text-gray-900 border-transparent hover:bg-white' : 'bg-gray-900 text-white border-transparent hover:bg-gray-800'"
             @click="goToPreview"
-          >
-            下一步
-          </button>
-
+          >下一步</button>
+          
           <button
             type="button"
             class="h-14 w-24 flex-shrink-0 rounded-full border text-sm tracking-widest shadow-sm backdrop-blur-md transition-all active:scale-95"
             :class="isDarkMode ? 'border-white/20 bg-gray-900/50 text-gray-300 hover:bg-gray-800' : 'border-gray-900/10 bg-white/50 text-gray-600 hover:bg-white'"
             @click="reset"
-          >
-            重选
-          </button>
-        </div>
-      </div>
-
-      <div v-else-if="status === 'preview'" class="flex w-full flex-col items-center animate-fade-in">
-        <div class="w-full" :class="shareSettings.ratio === 'wallpaper' ? 'max-w-[18rem]' : 'max-w-sm'">
-          <SharePoster
-            ref="sharePosterRef"
-            :templateType="currentTemplate"
-            :image="displayImageUrl"
-            :palette="palette"
-            :playlistName="playlistName"
-            :bilingualCopy="bilingualCopy"
-            :emojis="emojis"
-            :isDarkMode="isDarkMode"
-            :shareRatio="shareSettings.ratio"
-            :showWatermark="shareSettings.showWatermark"
-            :dateLabel="getDateLabel()"
-          />
+          >重选</button>
         </div>
 
-        <p class="mt-4 text-center text-[0.55rem] tracking-[0.1em]" :class="isDarkMode ? 'text-gray-500' : 'text-gray-400'">
-          预览模式：保存后的卡片效果如上所示
-        </p>
-
-        <SharePanel
-          :presets="SHARE_PRESETS"
-          :selectedRatio="shareSettings.ratio"
-          :showWatermark="shareSettings.showWatermark"
-          :isDarkMode="isDarkMode"
-          :isSaving="isSaving"
-          :copyStatus="copyStatus"
-          @set-ratio="setShareRatio"
-          @toggle-watermark="toggleWatermark"
-          @save="saveCard"
-          @back="goBackToEdit"
-          @copy="copyShareText"
-        />
+        <div v-if="status === 'preview'" class="mt-4 flex w-full gap-4 px-2">
+          <button
+            type="button"
+            class="h-14 flex-1 rounded-full text-sm tracking-widest shadow-md transition-all active:scale-95 border"
+            :class="isDarkMode ? 'bg-gray-100 text-gray-900 border-transparent hover:bg-white' : 'bg-gray-900 text-white border-transparent hover:bg-gray-800'"
+            @click="saveCard"
+          >{{ isSaving ? 'SAVING...' : '保存卡片' }}</button>
+          
+          <button
+            type="button"
+            class="h-14 w-24 flex-shrink-0 rounded-full border text-sm tracking-widest shadow-sm backdrop-blur-md transition-all active:scale-95"
+            :class="isDarkMode ? 'border-white/20 bg-gray-900/50 text-gray-300 hover:bg-gray-800' : 'border-gray-900/10 bg-white/50 text-gray-600 hover:bg-white'"
+            @click="goBackToEdit"
+          >上一步</button>
+        </div>
       </div>
-
+      
       <VibeDiary
         v-else-if="status === 'diary'"
         :diaryList="diaryList"
